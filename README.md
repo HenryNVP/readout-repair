@@ -83,20 +83,23 @@ the regime follows the task or the severity of the failure (`tab:severity` in th
 |---|---|
 | [`paper/`](paper) | `main.tex`, `refs.bib`, `figs/` |
 | [`pipeline/`](pipeline) | reproduction, one stage per step: fetch, train, then one script per table / figure |
-| [`scripts/`](scripts) | the experiments, flat; each runs as `python scripts/<name>.py --help` |
+| [`scripts/`](scripts) | the experiments; each runs as `python scripts/<name>.py --help` |
+| [`ros2_ws/src/`](ros2_ws/src) | the testbed modules the experiments run on, unchanged from edge-vla-hil: policy backends, env factory, chunk executors (no ROS nodes; pure Python) |
 | [`tests/`](tests) | one test file per module |
+
+The rollouts run through the testbed's own step harness (`scripts/sil_step.py`, synchronous chunk
+execution) and modules, exactly as for the paper; only scripts the paper does not use were removed.
 
 `scripts/`, by role:
 
 | Role | Files |
 |---|---|
-| shared modules | `policy.py` (ACT, SmolVLA, DP backends), `dp_repo_policy.py`, `env_factory.py` (robosuite), `rotation.py`, `rollout.py` (closed-loop episodes, sim helpers), `stats.py` |
-| rollouts and labels | `interp_collect.py` (any policy, task, perturbation; records what the policy saw and counterfactual labels), `interp_nuisance.py` (the perturbations) |
+| rollouts and labels | `interp_collect.py` (any policy, task, perturbation; records what the policy saw and counterfactual labels), `interp_nuisance.py` (the perturbations), `sil_step.py` (the step harness), `sim_utils.py` |
 | retraining | `interp_edit.py` (ACT: head, LoRA, full), `interp_dp_repair.py`, `interp_vla_repair.py` |
-| probes | `interp_act_sites.py` (decodability and gain per ACT site, swap test), `interp_gainmap.py`, `interp_repairable.py` (probe R²) |
+| probes | `interp_act_sites.py` (decodability and gain per ACT site, swap test), `interp_gainmap.py`, `interp_repairable.py` (probe R²), `stats.py` |
 | data | `robomimic_to_lerobot.py`, `interp_augment.py` (shifted demo replays), `interp_regen.py` (ToolHang images), `interp_demos_npz.py`, `stamp_act_checkpoint.py` |
 | tables and figures | `interp_grid.py` (Tables 1–3, Figure 3), `interp_nuisance.py` (Figure 2) |
-| environment | `setup_env.sh`, `remote_run.sh` (same setup on a rented GPU box) |
+| environment | `setup_env.sh`, `remote_run.sh` (same setup on a rented GPU box); `run_manifest.py`, `wifi_trace.py` (used by the harness) |
 
 ## Setup
 

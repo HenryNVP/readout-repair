@@ -66,13 +66,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
 
 import numpy as np
 
-from rotation import abs7_to_abs10, axisangle_to_quat, quat_mul, quat_to_axisangle
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_REPO, 'ros2_ws', 'src', 'evh_reactive'))
+sys.path.insert(0, os.path.join(_REPO, 'ros2_ws', 'src', 'evh_controller'))
+
+from evh_controller.rotation import abs7_to_abs10  # noqa: E402
+from evh_reactive.transforms import axisangle_to_quat, quat_mul, quat_to_axisangle  # noqa: E402
 
 # Human-readable instruction per robosuite env. ACT is not language-conditioned, so this only
 # labels the episodes -- but a dataset that says "Lift" and nothing else is hard to read later.

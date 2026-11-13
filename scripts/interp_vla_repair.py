@@ -23,6 +23,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sil_step  # noqa: E402,F401  (puts the ROS-free packages on sys.path)
 
 
 def load(patterns: str):
@@ -51,8 +52,7 @@ def main() -> None:
     p.add_argument('--seed', type=int, default=0)
     args = p.parse_args()
     import torch
-
-    from policy import make_policy
+    from evh_controller.policy import make_policy
     torch.manual_seed(args.seed)
     policy = make_policy('smolvla', args.parent)
     vla = policy._model

@@ -27,9 +27,10 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+_REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO / 'ros2_ws' / 'src' / 'evh_controller'))
 
-from policy import POLICY_SIDECAR  # noqa: E402
+from evh_controller.policy import POLICY_SIDECAR  # noqa: E402
 
 ACTION_MODE_FILE = 'evh_action_mode.json'
 

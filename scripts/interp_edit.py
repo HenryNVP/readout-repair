@@ -28,6 +28,8 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sil_step  # noqa: E402,F401  (puts the ROS-free packages on sys.path)
+
 from robomimic_to_lerobot import STATE_KEYS, sorted_demos  # noqa: E402
 
 AUG = 'outputs/interp/aug'
@@ -47,8 +49,7 @@ SITES = {                                    # name -> (module path under ACT.mo
 def load(path: str, pick) -> list[dict]:
     """Episodes of a replay HDF5 for which pick(source rank, shift) is true."""
     import h5py
-
-    from rotation import abs7_to_abs10
+    from evh_controller.rotation import abs7_to_abs10
     eps = []
     with h5py.File(path, 'r') as f:
         data = f['data']
@@ -352,8 +353,7 @@ def main() -> None:
     args = p.parse_args()
 
     import torch
-
-    from policy import make_policy
+    from evh_controller.policy import make_policy
     torch.manual_seed(args.seed)
     act = make_policy('act', args.parent)._model.eval()
     dev = next(act.parameters()).device

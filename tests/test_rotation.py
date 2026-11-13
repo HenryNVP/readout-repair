@@ -8,16 +8,12 @@ module converts only at the boundary.
 import numpy as np
 import pytest
 
-from rotation import (
+from evh_controller.rotation import (
     abs7_to_abs10,
     abs10_to_abs7,
     axisangle_to_matrix,
-    axisangle_to_quat,
     matrix_to_axisangle,
     matrix_to_rotation_6d,
-    quat_mul,
-    quat_normalize,
-    quat_to_axisangle,
     rotation_6d_to_matrix,
 )
 
@@ -81,31 +77,33 @@ def test_6d_is_continuous_where_axis_angle_flips_sign():
     assert d6_gap < 1e-2         # the same pair, continuous in 6D
 
 
-# ------------------------------------------------------------- quaternions
-def test_axisangle_quat_roundtrip():
-    for aa in ([0.3, 0.0, 0.0], [0.0, -0.5, 0.2], [1.0, 1.0, 1.0]):
-        aa = np.asarray(aa, dtype=float)
-        assert np.allclose(quat_to_axisangle(axisangle_to_quat(aa)), aa, atol=1e-9)
+# ------------------------------------------------------------- rotation averaging
+def test_averaging_near_the_pi_wrap_stays_near_pi_not_identity():
+    """Two nearly identical rotations whose axis-angle vectors point opposite ways (either side
+    of the wrap) must average to a rotation near both, not to zero."""
+    from evh_controller.rotation import average_axisangles, axisangle_to_matrix
+
+    a = np.array([np.pi - 0.02, 0.0, 0.0])
+    b = -np.array([np.pi - 0.03, 0.0, 0.0])        # the same axis flipped: ~0.05 rad from a
+    mean = average_axisangles(np.stack([a, b]), np.ones(2))
+
+    assert np.linalg.norm(mean) > 3.0, 'collapsed to the identity like an element-wise mean'
+    for x in (a, b):
+        R = axisangle_to_matrix(mean).T @ axisangle_to_matrix(x)
+        assert np.arccos(np.clip((np.trace(R) - 1) / 2, -1, 1)) < 0.05
 
 
-def test_zero_rotation():
-    assert np.allclose(axisangle_to_quat(np.zeros(3)), [0, 0, 0, 1])
-    assert np.allclose(quat_to_axisangle(np.array([0, 0, 0, 1.0])), np.zeros(3))
+def test_averaging_identical_rotations_returns_that_rotation():
+    from evh_controller.rotation import average_axisangles, axisangle_to_matrix
+
+    x = np.array([0.3, -1.2, 2.0])
+    mean = average_axisangles(np.stack([x, x, x]), np.array([0.2, 0.5, 0.3]))
+    assert np.allclose(axisangle_to_matrix(mean), axisangle_to_matrix(x), atol=1e-9)
 
 
-def test_quat_mul_90deg_about_z():
-    qz = axisangle_to_quat([0, 0, np.pi / 2])
-    q_full = quat_mul(qz, qz)   # two 90° turns = 180°
-    assert np.allclose(quat_to_axisangle(q_full), [0, 0, np.pi], atol=1e-9)
+def test_weights_pull_the_mean_toward_the_heavier_rotation():
+    from evh_controller.rotation import average_axisangles
 
-
-def test_shortest_path_sign():
-    # -q represents the same rotation; the error extraction must not return a ~2*pi detour
-    q = axisangle_to_quat([0.2, 0.1, -0.3])
-    assert np.allclose(quat_to_axisangle(-q), quat_to_axisangle(q), atol=1e-9)
-
-
-def test_normalize_degenerate():
-    assert np.allclose(quat_normalize(np.zeros(4)), [0, 0, 0, 1])
-    with pytest.raises(ValueError):
-        quat_mul(np.zeros(3), np.zeros(4))   # malformed input should not pass silently
+    a, b = np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.4])
+    heavy_b = average_axisangles(np.stack([a, b]), np.array([0.1, 0.9]))
+    assert 0.3 < heavy_b[2] < 0.4
