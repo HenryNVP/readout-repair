@@ -9,7 +9,7 @@ and it has to reach the right key on both the flat 1.4 config and the composite 
 """
 import pytest
 
-from evh_plant.env_factory import EnvSpec, set_control_delta
+from env_factory import EnvSpec, set_control_delta
 
 
 @pytest.mark.parametrize('value', [True, False])
@@ -53,7 +53,7 @@ def test_spec_defaults_match_the_dp_lift_checkpoint():
 # ------------------------------------------------------------------- timebase
 @pytest.mark.parametrize('hz,substeps', [(250.0, 2), (100.0, 5), (20.0, 25), (500.0, 1)])
 def test_rates_that_divide_the_timestep_are_accepted(hz, substeps):
-    from evh_plant.env_factory import check_timebase
+    from env_factory import check_timebase
     assert check_timebase(hz, 0.002) == substeps
 
 
@@ -61,13 +61,13 @@ def test_rates_that_divide_the_timestep_are_accepted(hz, substeps):
 def test_a_rate_that_would_drop_part_of_a_substep_is_refused(hz):
     """200 Hz asked robosuite for 2.5 substeps and got 2: simulated time ran at 80% of wall
     time and the policy acted every 40 ms of sim time instead of 50."""
-    from evh_plant.env_factory import TimebaseError, check_timebase
+    from env_factory import TimebaseError, check_timebase
     with pytest.raises(TimebaseError, match='simulated time would drift'):
         check_timebase(hz, 0.002)
 
 
 def test_the_default_plant_rate_is_exact():
-    from evh_plant.env_factory import EnvSpec, check_timebase
+    from env_factory import EnvSpec, check_timebase
     assert check_timebase(EnvSpec().action_hz, 0.002) == 2
 
 
@@ -75,7 +75,7 @@ def test_the_default_plant_rate_is_exact():
 def test_hold_in_delta_mode_is_zeros():
     import numpy as np
 
-    from evh_plant.env_factory import hold_action
+    from env_factory import hold_action
     obs = {'robot0_eef_pos': np.array([0.1, 0.2, 0.9]), 'robot0_eef_quat': np.array([1, 0, 0, 0.])}
     assert not hold_action(obs, False, 7).any()
 
@@ -84,7 +84,7 @@ def test_hold_in_absolute_mode_is_the_current_pose_in_the_controller_frame():
     """Invariants 2 and 7: never the origin, and never the reported frame."""
     import numpy as np
 
-    from evh_plant.env_factory import eef_to_control_quat, hold_action, quat_to_axisangle
+    from env_factory import eef_to_control_quat, hold_action, quat_to_axisangle
     q = np.array([1.0, 0.0, 0.0, 0.0])
     obs = {'robot0_eef_pos': np.array([0.1, 0.2, 0.9]), 'robot0_eef_quat': q}
     hold = hold_action(obs, True, 7)
@@ -97,6 +97,6 @@ def test_hold_in_absolute_mode_is_the_current_pose_in_the_controller_frame():
 def test_hold_in_absolute_mode_refuses_to_guess_a_missing_pose():
     import numpy as np
 
-    from evh_plant.env_factory import hold_action
+    from env_factory import hold_action
     with pytest.raises(RuntimeError):
         hold_action({'robot0_eef_pos': np.zeros(3)}, True, 7)

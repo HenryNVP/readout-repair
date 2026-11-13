@@ -131,8 +131,9 @@ def main() -> None:
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from dp_anchor_probe import observe
+
     from interp_gainmap import TASKS, make_env
+    from rollout import observe
     env, _ = make_env(TASKS['lift'])
     views = [observe(env)]
     for spec in args.spec:

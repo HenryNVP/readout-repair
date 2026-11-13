@@ -16,7 +16,7 @@ passes through one attention read of mem.
 
 Report per site: "seen" gain (ridge decode of the offset from the paired change, group CV by
 scene; xattn / dec at the baseline's target row) inside / outside the demo range, and the swap
-table (interp_swap) at mem and dec. Offset decodable at dec but action gain ~0 means the linear
+table (directions / block_gains) at mem and dec. Offset decodable at dec but action gain ~0 means the linear
 head does not read it: a readout gap a rank-2 head edit could close.
 
 Extrapolation probe, per operating point: each site's baseline is pushed along its local
@@ -37,10 +37,37 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import interp_probe as ip  # noqa: E402
-from interp_gainmap import (TASKS, inside_demo_range, jacobians, make_env,  # noqa: E402
-                            operating_points, probe, target)
-from interp_swap import block_gains, directions  # noqa: E402
+from interp_gainmap import (  # noqa: E402
+    TASKS,
+    inside_demo_range,
+    jacobians,
+    make_env,
+    operating_points,
+    probe,
+    target,
+)
+from stats import group_cv  # noqa: E402
+
+
+def directions(F: np.ndarray, step: float) -> np.ndarray:
+    """(P, G, G, D) feature changes -> (P, G-2, G-2, D, 2) d features / d mm, interior."""
+    vx = (F[:, 2:, 1:-1] - F[:, :-2, 1:-1]) / (2 * step)
+    vy = (F[:, 1:-1, 2:] - F[:, 1:-1, :-2]) / (2 * step)
+    return np.stack([vx, vy], -1)
+
+
+def block_gains(J: np.ndarray, V: np.ndarray, inside: np.ndarray) -> dict:
+    """Swap test. J (P, n, n, 2, D), V (P, n, n, D, 2), inside (P, n, n) -> {(head, dir): (2,)
+    median diagonal gain of J_a @ V_b over all same-point pairs, a from the head set, b from the
+    dir set}. Gain lost with out-of-range directions under an in-range head = the directions."""
+    out = {}
+    for hn, hm in (('in', inside), ('out', ~inside)):
+        for dn, dm in (('in', inside), ('out', ~inside)):
+            g = [np.einsum('aod,bdo->abo', J[p][hm[p]], V[p][dm[p]]).reshape(-1, 2)
+                 for p in range(len(J)) if hm[p].any() and dm[p].any()]
+            out[hn, dn] = np.nanmedian(np.concatenate(g), 0)
+    return out
+
 
 SITES = ('mem', 'xattn', 'dec')
 TOKENS = {'latent': [0], 'state': [1], 'agentview': list(range(2, 11)),
@@ -88,7 +115,8 @@ def forward(act, batch):
 
 def collect(args) -> dict:
     import torch
-    from evh_controller.policy import make_policy
+
+    from policy import make_policy
     task = TASKS[args.task]
     policy = make_policy('act', args.weights)
     act = policy._model.requires_grad_(True)    # loaded frozen; grads are taken w.r.t. sites only
@@ -200,7 +228,7 @@ def report(d: dict) -> None:
         same = idx == d['idx'][m][:, G // 2, G // 2][:, None, None]
         for s in SITES:
             dF = site_change(d, s, m)
-            pred = ip.group_cv(dF.reshape(P * G * G, -1), Y.reshape(-1, 2), groups).reshape(P, G, G, 2)
+            pred = group_cv(dF.reshape(P * G * G, -1), Y.reshape(-1, 2), groups).reshape(P, G, G, 2)
             Js = np.array([jacobians(x, step) for x in pred])
             print(f'  {s:6s} seen    in x {np.median(Js[inside][:, 0, 0]):5.2f} y '
                   f'{np.median(Js[inside][:, 1, 1]):5.2f}   out x {np.median(Js[~inside][:, 0, 0]):5.2f}'

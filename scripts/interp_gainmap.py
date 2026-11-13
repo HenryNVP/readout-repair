@@ -5,7 +5,7 @@ Operating points: each scene is rolled out synchronously with seeded noise until
 within each --radii of the nut's handle (gripper still open); the sim is frozen there. The nut
 is then moved over a --grid of (dx, dy) offsets, one chunk is predicted per offset with the SAME
 noise as the unmoved baseline (common random numbers), and the sim is restored. Both history
-frames show the moved scene (as in dp_anchor_probe), so the policy never sees the nut jump.
+frames show the moved scene, so the policy never sees the nut jump.
 
 Response: the chunk's last open-gripper target xy minus the baseline's (mm). Since the handle
 moves with the nut, perfect tracking is response = offset; the local gain is the 2x2 Jacobian
@@ -23,10 +23,44 @@ from collections import deque
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import sil_step  # noqa: E402
-from dp_anchor_probe import observe, predict, set_object  # noqa: E402
-from fuzzy_gate import _data_arrays  # noqa: E402
-from oracle_square import handle_pos  # noqa: E402
+from rollout import (  # noqa: E402
+    CONTROL_HZ,
+    REPO,
+    data_arrays,
+    frames,
+    observe,
+    predict,
+    set_object,
+)
+
+# Square nut geometry (robosuite NutAssemblySquare)
+PEG = np.array([0.23, 0.10, 0.85])           # peg1 (the square peg), world-axis aligned
+HANDLE_LOCAL = np.array([0.054, 0.0, 0.0])   # handle site in the nut frame
+TABLE_Z = 0.82
+
+
+def yaw_of(q) -> float:
+    """Heading of an (upright) body's x axis about world z; q = [x, y, z, w]."""
+    x, y, z, w = np.asarray(q, dtype=float) / np.linalg.norm(q)
+    return float(np.arctan2(2 * (x * y + z * w), 1 - 2 * (y * y + z * z)))
+
+
+def handle_pos(nut_pos, nut_quat) -> np.ndarray:
+    a = yaw_of(nut_quat)
+    c, s = np.cos(a), np.sin(a)
+    return np.asarray(nut_pos, float) + np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]) @ HANDLE_LOCAL
+
+
+def is_held(eef, grip, nut_pos, nut_quat) -> bool:
+    width = float(np.sum(np.abs(np.asarray(grip))))
+    return 0.015 < width < 0.06 and float(np.linalg.norm(handle_pos(nut_pos, nut_quat)
+                                                          - np.asarray(eef))) < 0.02
+
+
+def on_peg(nut_pos) -> bool:
+    nut_pos = np.asarray(nut_pos)
+    return bool(np.linalg.norm(nut_pos[:2] - PEG[:2]) < 0.02 and nut_pos[2] < TABLE_Z + 0.04)
+
 
 # per task: env, DP checkpoint, object keys and joint, the demos' xy range of the object at
 # reset (robosuite placement ranges), and the grasp point the response is measured at
@@ -64,7 +98,7 @@ def operating_points(env, obs, policy, radii, scene: int, task=TASKS['square']):
     """Roll one scene out synchronously with seeded noise and yield (obs, radius, tick) each
     time the eef first comes within a radius of the grasp point (xy), gripper still open.
     The caller may probe the sim at a yield but must leave it as it found it."""
-    hist = deque([sil_step.frames(obs)] * policy.n_obs_steps, maxlen=policy.n_obs_steps)
+    hist = deque([frames(obs)] * policy.n_obs_steps, maxlen=policy.n_obs_steps)
     radii = sorted(radii, reverse=True)
     chunk, i, ri = None, 0, 0
     for t in range(400):
@@ -80,20 +114,20 @@ def operating_points(env, obs, policy, radii, scene: int, task=TASKS['square']):
             chunk, i = predict(policy, hist, 10_000 + scene * 100 + t), 0
         obs, *_ = env.step(chunk[i])
         i += 1
-        hist.append(sil_step.frames(obs))
+        hist.append(frames(obs))
 
 
 def make_env(task=TASKS['square'], seed: int = 0):
-    from evh_plant.env_factory import EnvSpec, build_env
-    built = build_env(EnvSpec(env_name=task['env'], action_hz=sil_step.CONTROL_HZ,
+    from env_factory import EnvSpec, build_env
+    built = build_env(EnvSpec(env_name=task['env'], action_hz=CONTROL_HZ,
                               max_episode_s=21.0, seed=seed, absolute_actions=True))
     return built.env, built.obs
 
 
 def collect(args) -> dict:
-    from evh_controller.policy import make_policy
+    from policy import make_policy
     task = TASKS[args.task]
-    weights = args.weights or os.path.join(sil_step._REPO, 'checkpoints', task['ckpt'])
+    weights = args.weights or os.path.join(REPO, 'checkpoints', task['ckpt'])
     policy = make_policy(args.backend, weights, denoise_steps=args.denoise_steps)
     env, obs = make_env(task, args.env_seed)
     grid = np.linspace(-args.extent, args.extent, args.grid)
@@ -117,15 +151,15 @@ def collect(args) -> dict:
 
 def probe(env, policy, o, grid, seed: int, task=TASKS['square'], measure=target) -> np.ndarray:
     """Response (mm) of measure(chunk), by default the grasp target, to each nut offset; every
-    mjData array is restored after each (fuzzy_gate's bitwise restore), so the warm-up carries
+    mjData array is restored after each (bitwise), so the warm-up carries
     on unchanged."""
     d = env.sim.data
-    saved = _data_arrays(d)
+    saved = data_arrays(d)
     xy0 = np.array(o[task['pos']][:2], float)
 
     def chunk_at(dx, dy):
         set_object(env, task['joint'], xy0 + [dx, dy])
-        cur = sil_step.frames(observe(env))
+        cur = frames(observe(env))
         c = predict(policy, deque([cur] * policy.n_obs_steps), seed)
         for k, v in saved.items():
             cur = getattr(d, k)

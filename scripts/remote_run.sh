@@ -3,7 +3,7 @@
 #
 #   scripts/remote_run.sh <user@host> <ssh-port> outputs/<expt> [data dir ...]
 #
-# Pushes the working tree's code (scripts/, ros2_ws/src/, external DP and robomimic repos,
+# Pushes the working tree's code (scripts/, external DP and robomimic repos,
 # uncommitted changes included: the box has no .git, so the commit and the diff against it are
 # saved beside the results as code.commit / code.patch), the data dirs and <expt>/run.sh; runs
 # scripts/setup_env.sh; launches run.sh detached (it survives ssh drops), then pulls <expt>/
@@ -23,8 +23,8 @@ $SSH $H "command -v rsync > /dev/null || (apt-get update -qq && apt-get install 
     > /dev/null || { echo "cannot reach $H:$P"; exit 1; }
 if ! $SSH $H "test -f $R/$X/run.log"; then
   git rev-parse HEAD > $X/code.commit
-  git diff HEAD -- scripts ros2_ws > $X/code.patch
-  rs --relative --copy-links --exclude __pycache__ --exclude .git scripts ros2_ws/src pyproject.toml requirements.txt external/diffusion_policy \
+  git diff HEAD -- scripts > $X/code.patch
+  rs --relative --copy-links --exclude __pycache__ --exclude .git scripts pyproject.toml requirements.txt external/diffusion_policy \
       external/robomimic $X/run.sh $X/code.commit $X/code.patch "$@" $H:$R/ || exit 1
   echo "$(date +%H:%M) pushed; setting up (log: $X/setup.log)"
   $SSH $H "cd $R && $E bash scripts/setup_env.sh" > $X/setup.log 2>&1 \

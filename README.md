@@ -9,9 +9,8 @@ the two cost very different amounts to fix. This repo carries last-layer retrain
 feature quality in image classifiers, over to closed-loop policies (ACT, Diffusion Policy, SmolVLA)
 on robomimic Lift, Square and ToolHang.
 
-Moved out of [edge-vla-hil](https://github.com/HenryNVP/edge-vla-hil/tree/policy-interp) (branch
-`policy-interp`) with only the code the experiments import; files keep their original paths, so
-no imports changed.
+Extracted from [edge-vla-hil](https://github.com/HenryNVP/edge-vla-hil/tree/policy-interp) (branch
+`policy-interp`), a latency testbed, keeping only what the paper's experiments run.
 
 ## Method
 
@@ -78,23 +77,26 @@ retrain still works. The retrain, not the probe, is the decisive measurement.
 **Still running:** whether partial-strength perturbations on Square are head-limited, i.e. whether
 the regime follows the task or the severity of the failure (`tab:severity` in the paper).
 
-Figures: [`paper/figs/`](paper/figs) (`fig_grid.pdf`, `fig_depth.pdf`, `fig_shifts.pdf`, ...).
-
 ## Layout
 
 | Path | What |
 |---|---|
 | [`paper/`](paper) | `main.tex`, `refs.bib`, `figs/` |
-| [`scripts/interp_*.py`](scripts) | the experiments: collect, probe, gain maps, swap/edit/repair, grid, figures |
-| `scripts/oracle_*.py`, `refiner.py`, `square_failures.py`, `dp_mech.py`, `dp_anchor_probe.py`, `fuzzy_gate.py`, `sil_step.py` | scripted demonstrators, rollout harness and helpers the experiments call |
-| [`scripts/setup_env.sh`](scripts/setup_env.sh), [`remote_run.sh`](scripts/remote_run.sh) | environment setup; runner for a rented GPU box (SmolVLA runs) |
-| [`ros2_ws/src/`](ros2_ws/src) | the pure-Python modules used from the testbed: policy backends, env factory, chunk executors, object filter. No ROS nodes. |
+| [`pipeline/`](pipeline) | reproduction, one stage per step: fetch, train, then one script per table / figure |
+| [`scripts/`](scripts) | the experiments, flat; each runs as `python scripts/<name>.py --help` |
 | [`tests/`](tests) | one test file per module |
 
-**Not in this repo:** `outputs/` (results, ~50 GB), `checkpoints/`, `data/` (robomimic datasets)
-and `external/{diffusion_policy,robomimic}` (vendored model code, from the edge-vla-hil repo).
-They are gitignored; the scripts expect them at those paths, so place them there (or symlink
-them) before running. Checkpoints and results are not published yet.
+`scripts/`, by role:
+
+| Role | Files |
+|---|---|
+| shared modules | `policy.py` (ACT, SmolVLA, DP backends), `dp_repo_policy.py`, `env_factory.py` (robosuite), `rotation.py`, `rollout.py` (closed-loop episodes, sim helpers), `stats.py` |
+| rollouts and labels | `interp_collect.py` (any policy, task, perturbation; records what the policy saw and counterfactual labels), `interp_nuisance.py` (the perturbations) |
+| retraining | `interp_edit.py` (ACT: head, LoRA, full), `interp_dp_repair.py`, `interp_vla_repair.py` |
+| probes | `interp_act_sites.py` (decodability and gain per ACT site, swap test), `interp_gainmap.py`, `interp_repairable.py` (probe R²) |
+| data | `robomimic_to_lerobot.py`, `interp_augment.py` (shifted demo replays), `interp_regen.py` (ToolHang images), `interp_demos_npz.py`, `stamp_act_checkpoint.py` |
+| tables and figures | `interp_grid.py` (Tables 1–3, Figure 3), `interp_nuisance.py` (Figure 2) |
+| environment | `setup_env.sh`, `remote_run.sh` (same setup on a rented GPU box) |
 
 ## Setup
 
@@ -104,30 +106,38 @@ A plain Python 3.10 venv; no Docker, no ROS. Pins are the versions the results w
 ```bash
 bash scripts/setup_env.sh          # .venv + ~/evh_env.sh; PYTHON=/path/to/python3.10 if not on PATH
 source ~/evh_env.sh                # activates the venv, sets MUJOCO_GL (egl, else osmesa)
+python -m pytest -q
 ```
 
-`scripts/remote_run.sh` runs the same setup on a rented GPU box (with `EVH_APT=1` for the GL libraries).
+## Reproduce
 
-How close a rerun gets: the venv is deterministic (two runs, bit-identical), and on two ACT Lift
-evals (`cam=0,0.06,0,0` and `cam=0,0,0,30;wroll=90`, 20 episodes each) it matched the recorded
-success counts and every episode's outcome and length. Trajectories agree to ~1e-5 on short
-episodes but drift on long failing ones: the original runs used Ubuntu's apt scipy, whose LAPACK
-(reached through robosuite's numba-compiled controller) differs from the pip wheel's in the last
-bits of the torques. Expect identical outcomes almost always, not bit-identical trajectories.
-
-## Run
+Each stage skips work whose output already exists, so it can be rerun after an interruption.
+Outputs go to `outputs/interp/` (gitignored).
 
 ```bash
-python3 -m pytest -q
-python3 scripts/<script>.py ...
+bash pipeline/0_fetch.sh      # robomimic demos, the DP authors' checkpoints, pinned DP/robomimic sources (~12 GB, checksummed)
+bash pipeline/1_train.sh      # ACT on Lift (base + x/y coverage), Square, ToolHang; SmolVLA on Lift
+bash pipeline/2_position.sh   # Table 1, probe and swap numbers
+bash pipeline/3_perturb.sh    # Table 2, probe R²
+bash pipeline/4_severity.sh   # Table 3
+bash pipeline/5_depth.sh      # Figure 3 (LoRA / full fine-tuning, DAgger iterations, forgetting)
+bash pipeline/6_figures.sh    # Figure 2, and every table again
 ```
 
-Figures:
+Compute, roughly, on one 8 GB consumer GPU: training a day or two (SmolVLA wants a 16 GB card;
+`scripts/remote_run.sh` syncs the code to a rented box, sets it up and runs a `run.sh` there);
+stages 2–5 a few days in total, most of it Diffusion Policy and SmolVLA rollouts. Seeds are fixed (training scenes 1, 2, …; evaluation
+scenes 3, 4), so a rerun evaluates on the paper's scenes.
 
-```bash
-python3 scripts/interp_grid.py    # fig_grid, fig_depth
-python3 scripts/interp_figs.py    # fig_fix, fig_edit, fig_swap, fig_seen_vs_action, ...
-```
+How close a rerun gets:
+- **ACT rollouts, probes and head retrains are deterministic** in this venv (bit-identical run to
+  run). On two ACT Lift evals (20 episodes each) a rerun matched the recorded success counts and
+  every episode's outcome and length. Trajectories agree to ~1e-5 on short episodes but drift on
+  long failing ones: the original runs used Ubuntu's apt scipy, whose LAPACK (reached through
+  robosuite's numba-compiled controller) differs from the pip wheel's in the last bits.
+- **Diffusion Policy and SmolVLA rollouts, and full or LoRA fine-tuning, are not**: GPU sampling
+  and training kernels differ run to run, as they did for the original runs. Neither is training
+  from scratch. Expect those cells within their confidence intervals, not the same counts.
 
 Paper:
 
