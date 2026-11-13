@@ -4,11 +4,8 @@ checkpoints
 data
 external/
 
-# colcon dirs the edge-vla-hil:host entrypoint creates if run without --entrypoint
-ros2_ws/build/
-ros2_ws/install/
-ros2_ws/log/
-
 __pycache__/
 *.pyc
 .pytest_cache/
+.venv/
+.venv-env.sh

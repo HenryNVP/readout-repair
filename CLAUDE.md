@@ -6,18 +6,18 @@ are in `docs/interp-plan.md` (local only, excluded from git).
 
 ## Build & test
 
-No build. `tests/conftest.py` and the scripts put `ros2_ws/src/<pkg>` and `scripts/` on
-`sys.path`; keep files at these paths. The host has edge-vla-hil pip-installed in editable mode,
-so a missing module can silently import from the old repo there — trust the run in the
-`edge-vla-hil:host` image:
+No build, no Docker. `bash scripts/setup_env.sh` makes `.venv` (pins in `requirements.txt`);
+`source ~/evh_env.sh` activates it. `tests/conftest.py` and the scripts put `ros2_ws/src/<pkg>`
+and `scripts/` on `sys.path`; keep files at these paths. Run tests inside the venv: the
+system Python has edge-vla-hil pip-installed in editable mode, so a missing module can
+silently import from the old repo there.
 
 ```bash
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q   # required flag: apt pytest vs anyio plugin
+python3 -m pytest -q
 ```
 
-`test_interp_figs.py` fails in the image (matplotlib there predates `loc='outside ...'`); it
-passes on the host. One test file per module, named after it; keep heavy imports (torch, h5py)
-out of module scope in scripts so the suite stays fast.
+One test file per module, named after it; keep heavy imports (torch, h5py) out of module scope
+in scripts so the suite stays fast.
 
 `external/diffusion_policy` is vendored third-party code (via symlink). Do not edit it.
 
