@@ -1,0 +1,253 @@
+"""Paper 2 mechanism, with DP in place of the scripted planner: Lift and Square, moving object.
+
+The oracle testbeds (oracle_lift.py, oracle_square.py) showed what continuation, anchoring and
+close gating do when every chunk is right for the observation it was planned from. This runs the
+same executors and the same sweep (oracle_lift.run_sweep, the same conveyor, tracker model and
+delay tokens) on the image DP checkpoints, so the open question is only whether a learned,
+image-conditioned chunk behaves like the planner's.
+
+Two ways to continue a DP plan from the end of the queue, since images cannot be rolled forward:
+
+    continuation[_anchored]          proprio roll (VLASH-style): current images, the proprio
+                                     history replaced by the queued plan's last targets
+    continuation_inpaint[_anchored]  current observation as is, the queued actions as a hard
+                                     RTC-style inpainting prefix (capped by the horizon, 15)
+
+The proprio roll is deliberately cheap: a first-order model of the OSC's lag. Each queued target
+moves the predicted EE pose `lag` (0.3) of the way toward it, position linearly and orientation by
+normalised lerp (targets through the controller-frame offset, invariant 7). Setting the pose to the
+last TARGET instead was wrong by up to 10 cm on Square, because DP's absolute targets lead the arm
+when it moves fast, and it did worse than no roll (continuation 1/20 at d = 1). The quaternion is
+kept on the measured sign: q and -q are the same rotation, but the policy sees the raw numbers.
+Fingers <- open, or closed at `closed_qpos` once the plan closes them. The DP gets no object state, so nothing else is rolled. Anchoring and the
+tracker read the true object position from the simulator through the tracker model; it rides in
+the obs dict under 'object' and never reaches the policy.
+"""
+from __future__ import annotations
+
+import argparse
+import functools
+import os
+import sys
+
+import numpy as np
+
+import oracle_lift as ol
+
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+TASKS = {   # env, checkpoint, object keys, conveyor half range, closed finger qpos
+    'lift': ('Lift', 'dp_lift_ph_image_cnn.ckpt', 'cube_pos', 'cube_quat', 'cube_joint0',
+             0.12, 0.02),
+    'square': ('NutAssemblySquare', 'dp_square_ph_image_cnn.ckpt', 'SquareNut_pos',
+               'SquareNut_quat', 'SquareNut_joint0', 0.06, 0.01),
+}
+OPEN_QPOS = 0.04
+
+
+def make_frames(tracker, pos_key: str, quat_key: str):
+    """(agentview, wrist, proprio, extra); extra = [object(3), quat(4), tracked(3), ok(1)]."""
+    from sil_step import frames as image_frames
+
+    def frames(obs: dict, needs_wrist: bool = True):
+        agent, wrist, proprio = image_frames(obs, needs_wrist)
+        obj = np.asarray(obs[pos_key], np.float32)
+        est = obj if tracker is None else tracker.update(obj)
+        ok = est is not None
+        extra = np.concatenate([obj, np.asarray(obs[quat_key], np.float32),
+                                np.asarray(est if ok else obj, np.float32), [float(ok)]])
+        return agent, wrist, proprio, extra.astype(np.float32)
+    return frames
+
+
+def stack(hist, needs_wrist: bool = True) -> dict:
+    from sil_step import stack as image_stack
+    return {**image_stack(hist, needs_wrist), 'object': hist[-1][3]}
+
+
+def object_tracker(obs: dict):
+    o = obs['object']
+    return o[7:10] if o[10] > 0.5 else None
+
+
+def oracle_layout(obs: dict, task: str) -> dict:
+    """The oracle testbeds' proprio layout, rebuilt from the policy's proprio and 'object', so
+    their gates run unchanged. Square: [proprio(9), nut(3), nut quat(4), tracked(3), ok(1)] is
+    exactly proprio + object; Lift has no object quaternion."""
+    o = obs['object']
+    tail = o if task == 'square' else np.concatenate([o[0:3], o[7:11]])
+    return {'proprio': np.concatenate([np.asarray(obs['proprio'])[-1], tail])[None]}
+
+
+def task_gate(obs: dict, action, task: str, slack: float = 0.0) -> bool:
+    if task == 'square':
+        import oracle_square as sq
+        return sq.square_gate(oracle_layout(obs, task), action, slack=slack)
+    return ol.lift_gate(oracle_layout(obs, task), action)
+
+
+class SquareLift:
+    """Lift once the fingers have stopped closing: finger width changed by under `settle_m` since
+    the previous tick, at least `min_ticks` after the close. Fingers shut on nothing (width under
+    the oracle's empty_width) pass at once: holding cannot rescue an empty grasp. Keeps its own
+    previous width, since ACT sees one observation step."""
+
+    def __init__(self, settle_m: float = 0.0005, min_ticks: int = 3) -> None:
+        self.settle_m, self.min_ticks = settle_m, min_ticks
+        self._prev = None
+
+    def __call__(self, obs: dict, since_close: int) -> bool:
+        import oracle_square as sq
+        row = np.asarray(obs['proprio'])[-1]
+        w = float(row[7] - row[8])
+        prev, self._prev = (None if since_close <= 1 else self._prev), w
+        if w < sq.SquareConfig().empty_width:
+            return True
+        return (since_close >= self.min_ticks and prev is not None
+                and abs(w - prev) < self.settle_m)
+
+
+def proprio_roll(obs: dict, queued: np.ndarray, closed_qpos: float = 0.02,
+                 lag: float = 0.3) -> dict:
+    """Predict the proprio history at the end of the queue: the arm follows each queued target
+    with first-order lag `lag` per tick (1.0 = it reaches every target at once)."""
+    from oracle_square import axisangle_to_quat, ctrl_to_eef_quat
+    if len(queued) == 0:
+        return obs
+    s = np.asarray(obs['proprio'], np.float32).copy()
+    now = s[-1]
+    width_now = float(now[7] - now[8])
+    p, q = now[0:3].astype(float), now[3:7].astype(float)
+    states = []
+    for a in queued:
+        p = p + lag * (a[:3] - p)
+        qt = ctrl_to_eef_quat(axisangle_to_quat(a[3:6]))
+        if qt @ q < 0:
+            qt = -qt
+        q = q + lag * (qt - q)
+        q = q / np.linalg.norm(q)
+        states.append((p, q, a[6]))
+    for row, (p, q, g) in zip(range(len(s) - 1, -1, -1), states[::-1]):
+        s[row, 0:3] = p
+        s[row, 3:7] = q
+        if g < 0:
+            s[row, 7:9] = [OPEN_QPOS, -OPEN_QPOS]
+        elif width_now > 2 * OPEN_QPOS - 0.01:            # open now, the plan closes them
+            s[row, 7:9] = [closed_qpos, -closed_qpos]
+        else:
+            s[row, 7:9] = now[7:9]
+    return {**obs, 'proprio': s}
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap.add_argument('--task', default='lift', choices=sorted(TASKS))
+    ap.add_argument('--strategies', default='synchronous,noskip_async,continuation,'
+                                            'continuation_inpaint')
+    ap.add_argument('--deadline-s', type=float, default=20.0)
+    ap.add_argument('--denoise-steps', type=int, default=4, help='paper-1 cells used 4')
+    ap.add_argument('--backend', default='dp', help='dp | act | any make_policy backend')
+    ap.add_argument('--weights', default='', help='default: the task\'s DP checkpoint')
+    ap.add_argument('--gate-k', type=float, default=2.0,
+                    help='close gate position slack in tracker sigmas (Square)')
+    ap.add_argument('--roll-lag', type=float, default=0.3,
+                    help='first-order lag of the proprio roll per tick (1 = jump to targets)')
+    ap.add_argument('--refiner', default='', help="refiner weights (refiner.py) for 'refined'")
+    ap.add_argument('--refiner-log', default='', help="record the refiner's inputs (npz) for training")
+    ap.add_argument('--probe-log', default='',
+                    help='Square: counterfactual close probes (npz) for fuzzy_gate.py')
+    ap.add_argument('--fail-log', default='',
+                    help='Square: per-episode failure class and milestones (csv, square_failures.py)')
+    ap.add_argument('--fuzzy-gate', default='', help='fuzzy gate weights: replace the hard gate')
+    ap.add_argument('--label-log', default='',
+                    help="label every tick with the policy's fresh chunk (npz), refiner training")
+    ap.add_argument('--refiner-lead', type=int, default=0, help='predicted entry whose position is played')
+    ol.add_common_args(ap)
+    args = ap.parse_args()
+    if args.hz != 20.0:
+        sys.exit('the DP checkpoints run at 20 Hz')
+
+    import run_manifest
+    from evh_controller.policy import make_policy
+    from evh_plant.env_factory import EnvSpec, build_env
+    run_manifest.record(args.out, {'kind': 'dp_mech', 'config': vars(args)})
+    # (the name stays dp_mech: DP was first; --backend act runs the same sweep on ACT)
+
+    env_name, ckpt, pos_key, quat_key, joint, half_range, closed = TASKS[args.task]
+    if args.backend != 'dp' and not args.weights:
+        sys.exit(f'--backend {args.backend} needs --weights')
+    policy = make_policy(args.backend, args.weights or os.path.join(_REPO, 'checkpoints', ckpt),
+                         denoise_steps=args.denoise_steps)
+    if not policy.absolute_actions:
+        sys.exit('the mechanism executors shift absolute targets; this checkpoint emits deltas')
+    tracker = ol.tracker_from(args)
+    deadline = int(args.deadline_s * args.hz)
+    base = build_env(EnvSpec(env_name=env_name, action_hz=args.hz,
+                             max_episode_s=args.deadline_s + 1.0, seed=args.seed,
+                             absolute_actions=True)).env
+
+    refine_fn = None
+    if args.refiner:
+        import refiner
+        refine_fn = refiner.make_refine_fn(refiner.Refiner(args.refiner), object_tracker,
+                                            args.refiner_lead)
+        if args.refiner_log:
+            refine_fn = refiner.logging_refine_fn(refine_fn, args.refiner_log)
+
+    if args.task == 'square':
+        import oracle_square as sq
+
+        def held(o):
+            return sq.is_held(o['robot0_eef_pos'], o['robot0_gripper_qpos'], o[pos_key],
+                              o[quat_key])
+    else:
+        held = None                     # MovingCube's default: the Lift cube in the hand
+
+    gate_fn = functools.partial(task_gate, task=args.task,
+                                slack=args.gate_k * tracker.spec.sigma_mm * 1e-3)
+    if args.fuzzy_gate:
+        import fuzzy_gate
+        gate_fn = fuzzy_gate.make_gate_fn(fuzzy_gate.FuzzyGate(args.fuzzy_gate), object_tracker)
+    probers, traced, tracers = [], [], []
+
+    def make_world(v):
+        world = ol.MovingCube(base, v, args.hz, joint=joint, pos_key=pos_key, held_fn=held,
+                              half_range=half_range)
+        if args.fail_log:
+            import square_failures
+            if tracers:
+                tracers[-1].finish()               # the previous speed's last episode
+            world = square_failures.Tracer(world, traced, pos_key, quat_key)
+            tracers.append(world)
+        if args.probe_log:
+            import fuzzy_gate
+            probers.append(fuzzy_gate.Prober(world, args.probe_log.replace('.npz', f'_{v}.npz')))
+            return probers[-1]
+        return world
+
+    stack_fn = stack
+    if args.label_log:
+        import refiner
+        stack_fn = refiner.ChunkLabeler(policy, stack, args.label_log)
+    ol.run_sweep(args, policy=policy, tracker=tracker, deadline=deadline,
+                 make_world=make_world,
+                 frame_fn=make_frames(tracker, pos_key, quat_key), stack_fn=stack_fn,
+                 executor_kw={'roll_fn': functools.partial(proprio_roll, closed_qpos=closed,
+                                                       lag=args.roll_lag),
+                              'anchor_fn': object_tracker,
+                              'gate_fn': gate_fn, 'refine_fn': refine_fn,
+                              'lift_fn': SquareLift() if args.task == 'square' else None})
+    if args.refiner_log:
+        refine_fn.save()
+    if args.label_log:
+        stack_fn.save()
+    for p in probers:
+        p.save()
+    if args.fail_log:
+        import square_failures
+        tracers[-1].finish()
+        square_failures.write(args.fail_log, args.out, traced)
+
+
+if __name__ == '__main__':
+    main()

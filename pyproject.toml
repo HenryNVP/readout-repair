@@ -1,0 +1,171 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "readout-repair"
+version = "0.1.0"
+description = "Readout or Representation? A repair test for distribution-shift failures of visuomotor policies"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    { name = "Henry Nguyen", email = "henrynguyen.vp@gmail.com" }
+]
+keywords = [
+    "robotics",
+    "interpretability",
+    "diffusion-policy",
+    "act",
+    "distribution-shift",
+]
+
+# Mirrored by requirements-host.txt for Docker layer caching (see the note there).
+# Keep the two identical.
+dependencies = [
+    "numpy>=1.24,<2.0",
+    "robosuite==1.4.1",
+    "mujoco==2.3.7",
+    "torch>=2.2.1,<2.8.0",
+    "lerobot==0.3.3",
+    "opencv-python>=4.8",
+    # >=10.4: the apt python3-pil in the host image is 9.0.1, which HF datasets'
+    # image decoder (LeRobotDataset image features) trips over — PIL.Image.ExifTags.
+    "pillow>=10.4",
+    "onnx>=1.15",
+    "onnxruntime>=1.17",
+    "pyyaml>=6.0",
+    "imageio[ffmpeg]>=2.31",
+]
+
+[project.optional-dependencies]
+test = [
+    # 6.2 floor: the documented test loop runs in edge-vla-hil:host on apt python3-pytest 6.2.5.
+    # Keep this and [tool.pytest.ini_options] minversion in agreement.
+    "pytest>=6.2",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.11.0",
+    "pytest-asyncio>=0.21.0",
+]
+lint = [
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+    "types-PyYAML>=6.0.0",
+]
+dev = [
+    "edge-vla-hil[test,lint]",
+    "pre-commit>=3.5.0",
+    "ipdb>=0.13.0",
+]
+jetson = [
+    "numpy>=1.24,<2.0",
+    "opencv-python>=4.8",
+    "pycuda>=2024.1",
+    "onnx>=1.15",
+]
+
+# ----------------------------------------------------------------------
+# Build & package discovery
+# ----------------------------------------------------------------------
+
+[tool.setuptools.packages.find]
+where = [
+    "ros2_ws/src/evh_plant",
+    "ros2_ws/src/evh_controller",
+    "ros2_ws/src/evh_reactive",
+    "ros2_ws/src/evh_latency",
+]
+
+# ----------------------------------------------------------------------
+# Tooling configurations
+# ----------------------------------------------------------------------
+
+# The single pytest config: there is no pytest.ini (it would silently take precedence over
+# this block). Tests live in the top-level tests/ rather than per-package test/ dirs — a third of
+# them assert agreements BETWEEN packages, which have no honest
+# home under one package, and the pure-Python suite must run without a colcon build.
+[tool.pytest.ini_options]
+# 6.0, not the 7.4 of the [test] extra: the documented loop runs inside edge-vla-hil:host, which
+# has apt python3-pytest 6.2.5 (the same install whose anyio plugin clash forces
+# PYTEST_DISABLE_PLUGIN_AUTOLOAD=1). A higher floor here just refuses to collect in the container.
+minversion = "6.0"
+testpaths = ["tests"]
+markers = [
+    "ros2: test requires a sourced ROS2 environment (rclpy + message packages)",
+    "integration: test spins real nodes over DDS (implies ros2); give it its own ROS_DOMAIN_ID",
+]
+# UserWarning is deliberately NOT filtered: scipy/numpy raise one when the pinned versions drift
+# (invariant 4), and that is a signal, not noise.
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = [
+    "external",
+    "ros2_ws/build",
+    "ros2_ws/install",
+    "ros2_ws/log",
+    "outputs",
+    "*.ipynb",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E501",  # line length handled by ruff format / docstrings
+    "B008",  # do not perform function calls in argument defaults
+    "B905",  # zip without strict=
+]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "evh_plant",
+    "evh_controller",
+    "evh_reactive",
+    "evh_latency",
+    "robomimic_to_lerobot",   # scripts/ modules are ours too; tests import them by module name
+    "stamp_act_checkpoint",
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+exclude = [
+    "^external/",
+    "^ros2_ws/build/",
+    "^ros2_ws/install/",
+    "^ros2_ws/log/",
+]
+
+[tool.coverage.run]
+source = ["ros2_ws/src"]
+omit = [
+    "*/tests/*",
+    "*/external/*",
+    "*/ros2_ws/build/*",
+    "*/ros2_ws/install/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]
