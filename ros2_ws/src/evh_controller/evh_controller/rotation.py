@@ -1,4 +1,4 @@
-"""Rotation conversions shared by the policy backends and the dataset converter (pure numpy).
+"""Rotation conversions shared by the policy backends (pure numpy, no ROS/torch).
 
 Two conventions meet here. The project's action contract is 7-dim
 `[pos(3), axis-angle(3), gripper]`; the abs-action checkpoints — the DP robomimic ones, and any
@@ -12,7 +12,8 @@ up to 2 pi with no motion behind it. Regressing that target directly teaches a p
 two antipodal representations. 6D is continuous everywhere, which is why a network predicts it
 and this module converts at the boundary — never the other way round.
 
-Ported from the diffusion_policy repo's pytorch3d RotationTransformer, in numpy.
+Ported from the diffusion_policy repo's pytorch3d RotationTransformer, in numpy so the Jetson
+image needs neither torch nor pytorch3d to run an exported policy.
 """
 from __future__ import annotations
 
@@ -100,49 +101,22 @@ def abs7_to_abs10(chunk7: np.ndarray) -> np.ndarray:
     return out
 
 
-# ------------------------------------------------------------------ quaternions, [x, y, z, w]
-# (robosuite order); axis-angle = direction is the axis, norm the angle. Used by the dataset
-# converter to build absolute targets from the demos' deltas.
-_EPS = 1e-12
-IDENTITY_QUAT = np.array([0.0, 0.0, 0.0, 1.0])
+def average_axisangles(vectors: np.ndarray, weights: np.ndarray) -> np.ndarray:
+    """Weighted mean rotation of axis-angle vectors [N, 3], returned as axis-angle.
 
-
-def quat_normalize(q: np.ndarray) -> np.ndarray:
-    q = np.asarray(q, dtype=np.float64)
-    n = np.linalg.norm(q)
-    if n < _EPS:
-        return IDENTITY_QUAT.copy()
-    return q / n
-
-
-def quat_mul(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
-    """Hamilton product q1 ⊗ q2 (apply q2's rotation, then q1's)."""
-    x1, y1, z1, w1 = q1
-    x2, y2, z2, w2 = q2
-    return np.array([
-        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
-        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-    ])
-
-
-def axisangle_to_quat(aa: np.ndarray) -> np.ndarray:
-    aa = np.asarray(aa, dtype=np.float64)
-    angle = np.linalg.norm(aa)
-    if angle < _EPS:
-        return IDENTITY_QUAT.copy()
-    axis = aa / angle
-    s = np.sin(angle / 2.0)
-    return np.array([axis[0] * s, axis[1] * s, axis[2] * s, np.cos(angle / 2.0)])
-
-
-def quat_to_axisangle(q: np.ndarray) -> np.ndarray:
-    q = quat_normalize(q)
-    if q[3] < 0.0:   # canonical hemisphere -> shortest-path rotation
-        q = -q
-    s = np.linalg.norm(q[:3])
-    if s < _EPS:
-        return np.zeros(3)
-    angle = 2.0 * np.arctan2(s, q[3])
-    return (q[:3] / s) * angle
+    Averaging the vectors element-wise is wrong exactly where absolute targets live: near the pi
+    wrap, v and a near-antipodal -v' describe almost the same rotation and average to ~0, the
+    identity, i.e. a command to turn the gripper upside down. That is what temporal ensembling
+    did to every absolute action on Square (0.1-0.2 success at zero delay against 0.8 for the
+    other strategies). The chordal mean has no wrap: average the rotation MATRICES with the
+    weights, then project back onto SO(3) with an SVD (the closest rotation in Frobenius norm).
+    """
+    v = np.asarray(vectors, dtype=np.float64).reshape(-1, 3)
+    w = np.asarray(weights, dtype=np.float64).reshape(-1)
+    M = np.einsum('n,nij->ij', w / w.sum(), np.stack([axisangle_to_matrix(x) for x in v]))
+    U, _S, Vt = np.linalg.svd(M)
+    R = U @ Vt
+    if np.linalg.det(R) < 0:              # a reflection: flip the least significant axis
+        U[:, -1] *= -1.0
+        R = U @ Vt
+    return matrix_to_axisangle(R)

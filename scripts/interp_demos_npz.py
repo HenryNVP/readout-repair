@@ -18,6 +18,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sil_step  # noqa: E402,F401  (puts the ROS-free packages on sys.path)
 from robomimic_to_lerobot import STATE_KEYS, derive_absolute, osc_scales, sorted_demos  # noqa: E402
 
 
@@ -35,8 +36,7 @@ def main() -> None:
     p.add_argument('--chunk', type=int, default=16)
     args = p.parse_args()
     import h5py
-
-    from rotation import abs7_to_abs10
+    from evh_controller.rotation import abs7_to_abs10
     os.makedirs(args.out, exist_ok=True)
     with h5py.File(args.dataset, 'r') as f:
         data = f['data']

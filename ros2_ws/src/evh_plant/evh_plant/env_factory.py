@@ -1,9 +1,12 @@
-"""robosuite environment construction — everything version-fragile about the simulator, in one place:
-the 1.4-vs-1.5 controller config API, where `control_delta` lives in each config shape, and the
-`seed` kwarg that only 1.5 accepts.
+"""robosuite environment construction — everything version-fragile about the simulator, in one place.
 
-`control_delta=False` is absolute mode: OSC takes `action[:3]` as a world-frame position and
-`action[3:6]` as a world-frame axis-angle, rather than as deltas.
+Split out of `plant_node.py` so the node holds only the HiL logic (episodes, actions, the mode
+cross-check) and this holds the parts that break when robosuite moves: the 1.4-vs-1.5 controller
+config API, where `control_delta` lives in each config shape, and the `seed` kwarg that only
+1.5 accepts. No ROS imports, so it is unit-testable in the fast suite.
+
+`control_delta` is invariant 1's mechanism: absolute mode means OSC takes `action[:3]` as a
+world-frame position and `action[3:6]` as a world-frame axis-angle, rather than as deltas.
 """
 from __future__ import annotations
 
@@ -18,7 +21,8 @@ logger = logging.getLogger(__name__)
 # rotated -90 deg about z (measured exactly, and constant: R_ctrl = R_obs @ Rz(-pi/2), positions
 # identical). An ABSOLUTE orientation target is read in the controller's frame, so commanding the
 # arm its own reported orientation swings it ~90 degrees, while the controller-frame orientation
-# holds it still. Duplicated in robomimic_to_lerobot.py; test_robomimic_to_lerobot.py pins both.
+# holds it still (CLAUDE.md invariant 7). Duplicated in evh_reactive.tracking and
+# scripts/robomimic_to_lerobot.py (separate deployables); test_mode_crosscheck.py pins all three.
 EEF_TO_CONTROL_QUAT = np.array([0.0, 0.0, -np.sin(np.pi / 4), np.cos(np.pi / 4)])   # [x, y, z, w]
 
 
@@ -35,7 +39,11 @@ def eef_to_control_quat(eef_quat) -> np.ndarray:
 
 
 def quat_to_axisangle(q) -> np.ndarray:
-    """Quaternion [x, y, z, w] -> axis-angle (axis * angle). Canonical (shortest-path) hemisphere."""
+    """Quaternion [x, y, z, w] -> axis-angle (axis * angle). Canonical (shortest-path) hemisphere.
+
+    Duplicated from evh_reactive.transforms rather than shared: the two packages are deployed on
+    different machines and neither depends on the other. test_plant_node.py asserts they agree.
+    """
     q = np.asarray(q, dtype=np.float64)
     n = np.linalg.norm(q)
     if n < 1e-12:
@@ -53,13 +61,16 @@ def hold_action(obs: dict | None, absolute: bool, action_dim: int) -> np.ndarray
     """Neutral action for 'no command yet' (episode start / just after reset).
 
     Delta mode: zeros = don't move. Absolute mode (OSC control_delta=False): zeros would be an
-    ABSOLUTE target at the world origin (0,0,0), yanking the arm off the table — so
+    ABSOLUTE target at the world origin (0,0,0), yanking the arm off the table (invariant 2) — so
     command the CURRENT EE pose instead, i.e. a genuine hold. Gripper stays 0 (neutral/open at
     episode start).
 
     The orientation goes out in the OSC's tool frame, not the frame `robot0_eef_quat` reports:
     the reported one is 90 degrees off about z, and commanding it twists the arm for as long as
-    the hold lasts.
+    the hold lasts (invariant 7).
+
+    Shared by the plant node and the ROS-free step harness (scripts/sil_step.py), so the two
+    cannot drift apart on the one action whose mistake is a lurch.
     """
     action = np.zeros(action_dim, dtype=np.float32)
     if absolute and obs is not None and action_dim >= 6:
@@ -79,7 +90,7 @@ def hold_action(obs: dict | None, absolute: bool, action_dim: int) -> np.ndarray
 
 @dataclass(frozen=True)
 class EnvSpec:
-    """Everything `build_env` needs."""
+    """Everything `build_env` needs, so the node's parameter block is the only place they're read."""
     env_name: str = 'Lift'
     robot: str = 'Panda'
     cameras: tuple[str, ...] = ('agentview', 'robot0_eye_in_hand')
@@ -97,15 +108,15 @@ class EnvSpec:
 
 @dataclass
 class BuiltEnv:
-    """A constructed env plus what the caller needs to know about it."""
+    """A constructed env plus what the node needs to know about it."""
     env: object
     obs: dict
     action_dim: int
-    notes: list[str] = field(default_factory=list)   # things the caller should log
+    notes: list[str] = field(default_factory=list)   # things the node should log
 
 
 class TimebaseError(ValueError):
-    """The step rate does not map onto a whole number of physics substeps."""
+    """The plant's step rate does not map onto a whole number of physics substeps."""
 
 
 def check_timebase(action_hz: float, model_timestep: float) -> int:

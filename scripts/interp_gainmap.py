@@ -23,15 +23,8 @@ from collections import deque
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from rollout import (  # noqa: E402
-    CONTROL_HZ,
-    REPO,
-    data_arrays,
-    frames,
-    observe,
-    predict,
-    set_object,
-)
+import sil_step  # noqa: E402
+from sim_utils import data_arrays, observe, predict, set_object  # noqa: E402
 
 # Square nut geometry (robosuite NutAssemblySquare)
 PEG = np.array([0.23, 0.10, 0.85])           # peg1 (the square peg), world-axis aligned
@@ -60,6 +53,7 @@ def is_held(eef, grip, nut_pos, nut_quat) -> bool:
 def on_peg(nut_pos) -> bool:
     nut_pos = np.asarray(nut_pos)
     return bool(np.linalg.norm(nut_pos[:2] - PEG[:2]) < 0.02 and nut_pos[2] < TABLE_Z + 0.04)
+
 
 
 # per task: env, DP checkpoint, object keys and joint, the demos' xy range of the object at
@@ -98,7 +92,7 @@ def operating_points(env, obs, policy, radii, scene: int, task=TASKS['square']):
     """Roll one scene out synchronously with seeded noise and yield (obs, radius, tick) each
     time the eef first comes within a radius of the grasp point (xy), gripper still open.
     The caller may probe the sim at a yield but must leave it as it found it."""
-    hist = deque([frames(obs)] * policy.n_obs_steps, maxlen=policy.n_obs_steps)
+    hist = deque([sil_step.frames(obs)] * policy.n_obs_steps, maxlen=policy.n_obs_steps)
     radii = sorted(radii, reverse=True)
     chunk, i, ri = None, 0, 0
     for t in range(400):
@@ -114,20 +108,20 @@ def operating_points(env, obs, policy, radii, scene: int, task=TASKS['square']):
             chunk, i = predict(policy, hist, 10_000 + scene * 100 + t), 0
         obs, *_ = env.step(chunk[i])
         i += 1
-        hist.append(frames(obs))
+        hist.append(sil_step.frames(obs))
 
 
 def make_env(task=TASKS['square'], seed: int = 0):
-    from env_factory import EnvSpec, build_env
-    built = build_env(EnvSpec(env_name=task['env'], action_hz=CONTROL_HZ,
+    from evh_plant.env_factory import EnvSpec, build_env
+    built = build_env(EnvSpec(env_name=task['env'], action_hz=sil_step.CONTROL_HZ,
                               max_episode_s=21.0, seed=seed, absolute_actions=True))
     return built.env, built.obs
 
 
 def collect(args) -> dict:
-    from policy import make_policy
+    from evh_controller.policy import make_policy
     task = TASKS[args.task]
-    weights = args.weights or os.path.join(REPO, 'checkpoints', task['ckpt'])
+    weights = args.weights or os.path.join(sil_step._REPO, 'checkpoints', task['ckpt'])
     policy = make_policy(args.backend, weights, denoise_steps=args.denoise_steps)
     env, obs = make_env(task, args.env_seed)
     grid = np.linspace(-args.extent, args.extent, args.grid)
@@ -159,7 +153,7 @@ def probe(env, policy, o, grid, seed: int, task=TASKS['square'], measure=target)
 
     def chunk_at(dx, dy):
         set_object(env, task['joint'], xy0 + [dx, dy])
-        cur = frames(observe(env))
+        cur = sil_step.frames(observe(env))
         c = predict(policy, deque([cur] * policy.n_obs_steps), seed)
         for k, v in saved.items():
             cur = getattr(d, k)

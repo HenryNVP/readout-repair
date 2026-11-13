@@ -1,10 +1,17 @@
 # Tool configuration only: this repo is not a package and is never pip-installed. Dependencies
-# are in requirements.txt; everything lives flat in scripts/, which scripts and tests/conftest.py
-# put on sys.path.
+# are in requirements.txt; scripts and tests put ros2_ws/src/<pkg> and scripts/ on sys.path.
 
+# The single pytest config: there is no pytest.ini (it would silently take precedence over
+# this block). Tests live in the top-level tests/ rather than per-package test/ dirs — a third of
+# them assert agreements BETWEEN packages, which have no honest
+# home under one package.
 [tool.pytest.ini_options]
 minversion = "6.0"
 testpaths = ["tests"]
+markers = [
+    "ros2: test requires a sourced ROS2 environment (rclpy + message packages)",
+    "integration: test spins real nodes over DDS (implies ros2); give it its own ROS_DOMAIN_ID",
+]
 # UserWarning is deliberately NOT filtered: scipy/numpy raise one when the pinned versions drift
 # (the robosuite/mujoco pins), and that is a signal, not noise.
 filterwarnings = [
@@ -37,11 +44,13 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = [   # scripts/ modules; tests import them by module name
-    "dp_repo_policy", "env_factory", "interp_act_sites", "interp_augment", "interp_collect",
-    "interp_demos_npz", "interp_dp_repair", "interp_edit", "interp_gainmap", "interp_grid",
-    "interp_nuisance", "interp_regen", "interp_repairable", "interp_vla_repair", "policy",
-    "robomimic_to_lerobot", "rollout", "rotation", "stamp_act_checkpoint", "stats",
+known-first-party = [
+    "evh_plant",
+    "evh_controller",
+    "evh_reactive",
+    "evh_latency",
+    "robomimic_to_lerobot",   # scripts/ modules are ours too; tests import them by module name
+    "stamp_act_checkpoint",
 ]
 
 [tool.mypy]
@@ -55,7 +64,7 @@ exclude = [
 ]
 
 [tool.coverage.run]
-source = ["scripts"]
+source = ["ros2_ws/src"]
 omit = [
     "*/tests/*",
     "*/external/*",

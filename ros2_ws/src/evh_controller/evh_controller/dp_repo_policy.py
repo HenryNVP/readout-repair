@@ -15,16 +15,19 @@ Obs contract (dict, values stacked over the last n_obs_steps ticks, oldest first
     obs['proprio']    float [To, 9]         ([eef_pos(3), eef_quat(4, xyzw), gripper_qpos(2)])
 
 Chunking: the policy's horizon is 16 with n_obs_steps=2; instead of the repo default of 8
-actions per prediction we expose the full remaining tail (horizon - (n_obs_steps-1) = 15).
+actions per prediction we expose the full remaining tail (horizon - (n_obs_steps-1) = 15) and
+let the chunk-execution strategy decide how much to use — longer chunks are what keeps the
+executor out of the degenerate d >= H regime under real inference latency.
 
 Actions: the published robomimic image checkpoints are the ABS-ACTION variant — 10-dim
 [pos(3), rot_6d(6), gripper(1)] absolute EE pose targets, executed with OSC_POSE in
 control_delta=False mode. This backend converts to the project's 7-dim convention
 [pos(3), axis-angle(3), gripper] (the conversions live in `rotation.py`, shared with the ACT
-backend) and sets `absolute_actions=True` so the env runs OSC in absolute mode.
+backend) and sets `absolute_actions=True` so the plant/reactive layer switch OSC to absolute.
 
 Inference speed: the checkpoint was trained with DDPM(100); `denoise_steps` < 100 swaps in a
-DDIM scheduler with the same noise schedule (the standard DP eval trick).
+DDIM scheduler with the same noise schedule (the standard DP eval trick) so the Jetson/host can
+trade action quality for latency honestly.
 """
 from __future__ import annotations
 
@@ -34,8 +37,8 @@ import sys
 
 import numpy as np
 
-from policy import ChunkPolicy
-from rotation import abs10_to_abs7
+from evh_controller.policy import ChunkPolicy
+from evh_controller.rotation import abs7_to_abs10, abs10_to_abs7
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +51,9 @@ _DP_KEYS = {   # our obs dict key -> checkpoint obs key
 def _ensure_dp_repo_on_path() -> None:
     candidates = [
         os.environ.get('EVH_DP_REPO', ''),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'external',
-                     'diffusion_policy'),
+        '/ws/external/diffusion_policy',
+        os.path.join(os.path.dirname(__file__), '..', '..', '..', '..',
+                     'external', 'diffusion_policy'),
     ]
     for cand in candidates:
         if cand and os.path.isdir(os.path.join(cand, 'diffusion_policy')):
@@ -110,6 +114,7 @@ class DiffusionPolicyRepoBackend(ChunkPolicy):
     """ChunkPolicy over a diffusion_policy-repo image checkpoint (dict obs, see module doc)."""
 
     needs_wrist = True
+    guided_resampling = True   # predict_inpaint steers inside the denoising loop
 
     def __init__(self, ckpt_path: str, device: str = 'cuda',
                  denoise_steps: int = 16) -> None:
@@ -182,4 +187,78 @@ class DiffusionPolicyRepoBackend(ChunkPolicy):
             chunk = self._undo_abs_transform(chunk)
         return chunk
 
+    def predict_inpaint(self, obs: dict, prefix: np.ndarray,
+                        weights: np.ndarray) -> np.ndarray:
+        """RTC guided sampling: steer the chunk toward `prefix` with per-index weights `weights`.
+
+        This is the mechanism RTC turns on, and the base-class fallback is not it. The fallback
+        samples a chunk and overwrites the frozen entries afterwards, which produces exactly the
+        splice discontinuity RTC exists to remove: the model never knew about the prefix, so the
+        actions immediately after the frozen region carry on from a plan that was generated as if
+        the arm were somewhere else. Here the guidance is applied INSIDE the denoising loop, at
+        every step, so the sample is drawn coherent with the prefix rather than corrected into it.
+
+        Weights follow the paper's soft mask (see RTCExecutor.freeze_weights): 1.0 over the
+        actions that will execute during inference (hard freeze), decaying over the region that
+        should stay continuous with the previous plan, 0.0 over the tail the policy regenerates
+        freely.
+
+        The blend uses the CLEAN guidance value at each step rather than re-noising it to the
+        current level (RePaint-style). That follows the vendored repo's own conditioning
+        convention — `conditional_sample` hard-assigns clean values inside the same loop — and
+        keeps this consistent with how the checkpoint was trained to be conditioned.
+
+        Falls back to the base blend for a checkpoint that conditions by inpainting observation
+        features instead of a global feature vector, since the trajectory layout differs there.
+        """
+        import torch
+
+        policy = self._policy
+        if prefix is None or len(prefix) == 0 or weights is None or len(weights) == 0:
+            return self.predict(obs)
+        if not getattr(policy, 'obs_as_global_cond', False):
+            logger.warning('checkpoint conditions by obs-inpainting; using the soft-blend '
+                           'fallback for RTC guidance')
+            return super().predict_inpaint(obs, prefix, weights)
+
+        To, T, Da = self.n_obs_steps, int(policy.horizon), int(policy.action_dim)
+        start = To - 1          # trajectory row that chunk index 0 maps to (see predict)
+
+        with torch.no_grad():
+            nobs = policy.normalizer.normalize(self._to_policy_obs(obs))
+            this_nobs = {k: v[:, :To, ...].reshape(-1, *v.shape[2:]) for k, v in nobs.items()}
+            global_cond = policy.obs_encoder(this_nobs).reshape(1, -1)
+
+            guide = self._redo_abs_transform(prefix) if self.absolute_actions else np.asarray(
+                prefix, dtype=np.float32)
+            n = min(len(guide), len(weights), T - start)
+
+            cond = torch.zeros((1, T, Da), device=policy.device, dtype=policy.dtype)
+            mask = torch.zeros((1, T, 1), device=policy.device, dtype=policy.dtype)
+            guide_t = torch.from_numpy(np.ascontiguousarray(guide[:n])).to(
+                device=policy.device, dtype=policy.dtype).unsqueeze(0)
+            cond[:, start:start + n, :] = policy.normalizer['action'].normalize(guide_t)
+            mask[:, start:start + n, 0] = torch.from_numpy(
+                np.ascontiguousarray(np.asarray(weights[:n], dtype=np.float32))).to(
+                    device=policy.device, dtype=policy.dtype).clamp_(0.0, 1.0)
+
+            scheduler = policy.noise_scheduler
+            trajectory = torch.randn((1, T, Da), device=policy.device, dtype=policy.dtype)
+            scheduler.set_timesteps(policy.num_inference_steps)
+            for t in scheduler.timesteps:
+                trajectory = mask * cond + (1.0 - mask) * trajectory
+                model_output = policy.model(trajectory, t, local_cond=None,
+                                            global_cond=global_cond)
+                trajectory = scheduler.step(model_output, t, trajectory,
+                                            **getattr(policy, 'kwargs', {})).prev_sample
+            trajectory = mask * cond + (1.0 - mask) * trajectory
+
+            action_pred = policy.normalizer['action'].unnormalize(
+                trajectory[..., :Da])[0].detach().cpu().numpy()
+
+        chunk = np.asarray(action_pred[start:], dtype=np.float32)
+        return self._undo_abs_transform(chunk) if self.absolute_actions else chunk
+
     _undo_abs_transform = staticmethod(abs10_to_abs7)
+
+    _redo_abs_transform = staticmethod(abs7_to_abs10)

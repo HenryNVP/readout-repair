@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
-"""Roll a policy out (ACT, Diffusion Policy or SmolVLA; Lift, Square or ToolHang), optionally under a
-perturbation (--nuisance) or an object offset (--shift), and log per control tick what the policy
-saw next to the sim's ground truth, plus the labels a head retrain needs (--selflabel cf: the
-policy's own chunk on the same state rendered without the perturbation; --teacher: another ACT's
-chunk).
+"""Interp step 0: roll out DP (or ACT, --backend act) on Square (or Lift, --task lift) and log, per control tick, what the policy saw next to the
+sim's ground truth (docs/interp-plan.md).
 
-Per tick: the executed command and the state (eef pose, gripper, object pose; Square: held,
-on_peg); DP: `global_cond` (the obs encoder's output, what the denoiser is conditioned on); ACT
-with labels: the head input `dec` and the label. Per episode: success. One compressed .npz per
-episode in --out-dir. nut_pos / nut_quat are the task object's pose (the cube on Lift).
+Per tick: `global_cond` (the obs encoder's output, the only thing the denoiser is conditioned on;
+for the robomimic Square checkpoint 2 obs steps x [agentview 64 | wrist 64 | proprio 9]), the
+executed command, and the state: eef pose, gripper, nut pose, held, on_peg. Per episode: success. One compressed .npz per episode in --out-dir.
+nut_pos / nut_quat are the task object's pose (the cube on Lift); feats are saved for DP only.
 
-The rollout is rollout.run_episode (synchronous chunks). The encoder is run once more per tick on
-the same stacked history the policy gets; it does not touch the rollout (eval-mode crop is a
-centre crop, so it is deterministic).
+The rollout is sil_step's own loop (synchronous, d = 1), so episodes match the paper-2 harness.
+The encoder is run once more per tick on the same stacked history the executor gets; it does
+not touch the rollout (eval-mode crop is a centre crop, so it is deterministic).
 
     python3 scripts/interp_collect.py --out-dir outputs/interp/dp_square --episodes 200
 """
@@ -25,17 +22,10 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sil_step  # noqa: E402  (puts the ROS-free packages on sys.path)
+from sim_utils import data_arrays, observe, set_object  # noqa: E402
+
 from interp_gainmap import TASKS, is_held, on_peg  # noqa: E402
-from rollout import (  # noqa: E402
-    CONTROL_HZ,
-    REPO,
-    data_arrays,
-    frames,
-    observe,
-    run_episode,
-    set_object,
-    stack,
-)
 
 
 class Recorder:
@@ -55,8 +45,8 @@ class Recorder:
 
 
 def encode(policy, stacked: dict, encoder=None) -> np.ndarray:
-    """global_cond for one stacked history, as the DP policy builds it (`encoder` swaps in another
-    obs encoder of the same shape)."""
+    """global_cond for one stacked history, exactly as predict_inpaint builds it (`encoder`
+    swaps in another obs encoder of the same shape, e.g. an untrained control)."""
     import torch
     dp = policy._policy
     encoder = encoder or dp.obs_encoder
@@ -118,7 +108,7 @@ def self_label(env, policy, obs, batch, task, delta: float = 0.01, full: bool = 
 
     def chunk_at(p):
         set_object(env, task['joint'], p)
-        b = policy._obs_to_batch(stack([frames(observe(env))], True))
+        b = policy._obs_to_batch(sil_step.stack([sil_step.frames(observe(env))], True))
         for k, v in saved.items():
             cur = getattr(d, k)
             if cur.shape == v.shape:
@@ -143,7 +133,7 @@ def cf_label(env, policy, nuis, backend: str = 'act') -> np.ndarray:
     import torch
     if nuis is not None:
         nuis.off(env)
-    stacked = stack([frames(observe(env))] * policy.n_obs_steps, True)
+    stacked = sil_step.stack([sil_step.frames(observe(env))] * policy.n_obs_steps, True)
     if nuis is not None:
         nuis.on(env)
     with torch.no_grad():
@@ -188,14 +178,14 @@ def main() -> None:
     args = p.parse_args()
     shift = np.array([float(v) for v in args.shift.split(',')])
     task = TASKS[args.task]
-    weights = args.weights or os.path.join(REPO, 'checkpoints', task['ckpt'])
+    weights = args.weights or os.path.join(sil_step._REPO, 'checkpoints', task['ckpt'])
 
-    from env_factory import EnvSpec, build_env
-    from policy import make_policy
+    from evh_controller.policy import make_policy
+    from evh_plant.env_factory import EnvSpec, build_env
 
     os.makedirs(args.out_dir, exist_ok=True)
     policy = make_policy(args.backend, weights, denoise_steps=args.denoise_steps)
-    built = build_env(EnvSpec(env_name=task['env'], action_hz=CONTROL_HZ,
+    built = build_env(EnvSpec(env_name=task['env'], action_hz=sil_step.CONTROL_HZ,
                               max_episode_s=args.deadline_s + 1.0, seed=args.seed,
                               absolute_actions=policy.absolute_actions))
     env = built.env
@@ -219,6 +209,8 @@ def main() -> None:
             o = observe(env)
         return place(env, o, shift, task)
     obs = fresh(built.obs)
+    worker = sil_step.StepWorker(policy, sil_step.fixed_delay(1))
+    executor = sil_step.make_strategy('synchronous', worker, policy)
     wins = 0
     for scene in range(args.episodes):
         if scene >= args.first_scene:
@@ -226,7 +218,7 @@ def main() -> None:
             feats, states, heads, labels, label_ticks, seen = [], [], [], [], [], []
 
             def stack_fn(hist, needs_wrist):
-                stacked = stack(hist, needs_wrist)
+                stacked = sil_step.stack(hist, needs_wrist)
                 if args.backend == 'dp':
                     feats.append(encode(policy, stacked))
                 if args.selflabel == 'cf' and args.backend == 'smolvla':
@@ -267,8 +259,9 @@ def main() -> None:
                 states.append(state(rec.obs, task))
                 return stacked
 
-            ep = run_episode(rec, obs, policy, deadline_ticks=int(args.deadline_s * CONTROL_HZ),
-                             absolute=policy.absolute_actions, stack_fn=stack_fn)
+            ep = sil_step.run_episode(rec, obs, policy, executor, worker,
+                                      deadline_ticks=int(args.deadline_s * sil_step.CONTROL_HZ),
+                                      absolute=policy.absolute_actions, stack_fn=stack_fn)
             states.append(state(rec.obs, task))     # the state after the last step
             cols = {k: np.array([s[k] for s in states]) for k in states[0]}
             cmds = np.array(rec.commands)

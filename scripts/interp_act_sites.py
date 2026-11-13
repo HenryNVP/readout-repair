@@ -115,8 +115,7 @@ def forward(act, batch):
 
 def collect(args) -> dict:
     import torch
-
-    from policy import make_policy
+    from evh_controller.policy import make_policy
     task = TASKS[args.task]
     policy = make_policy('act', args.weights)
     act = policy._model.requires_grad_(True)    # loaded frozen; grads are taken w.r.t. sites only
