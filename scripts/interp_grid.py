@@ -24,13 +24,17 @@ PANELS = (('ACT, Lift', 'outputs/interp/nuis/', ''), ('Diffusion Policy, Lift', 
           ('SmolVLA, Lift', 'outputs/interp/remote2/', ''), ('ACT, Square', 'outputs/interp/nuis/', 'sq_'),
           ('Diffusion Policy, Square', 'outputs/interp/nuis/', 'dpsq_'),
           ('ACT, ToolHang', 'outputs/interp/nuis/', 'th_'))
+# in-distribution base success (k, n), for the failure rule: lift_act_base_s3_shift_0,0, DP Lift and ToolHang
+# dev runs (docs), remote2/pos_0,0, <prefix>eval3_base_none
+INDIST = {'ACT, Lift': (100, 100), 'Diffusion Policy, Lift': (100, 100), 'SmolVLA, Lift': (50, 50),
+          'ACT, Square': (84, 100), 'Diffusion Policy, Square': (95, 100), 'ACT, ToolHang': (23, 50)}
 SHIFTS = (('bothcam', 'turn + roll'), ('darkredwroll', 'red, dim + roll'), ('bothflip', 'upside down'),
           ('bothzoom', 'zoomed'), ('faint', 'faint object'), ('invisible', 'invisible object'))
 
 
 def rate(d: str):
-    """(successes, episodes) of an eval dir, or None if it has no episodes."""
-    fs = sorted(glob.glob(f'{d}/ep*.npz'))
+    """(successes, episodes) of an eval dir pooled with its extra-seed twin (eval3_ -> eval4_), or None."""
+    fs = sorted(glob.glob(f'{d}/ep*.npz')) + sorted(glob.glob(f"{d.replace('eval3_', 'eval4_')}/ep*.npz"))
     if not fs:
         return None
     return int(sum(bool(np.load(f)['success']) for f in fs)), len(fs)
@@ -50,7 +54,19 @@ def collect(panels=PANELS, shifts=SHIFTS) -> list:
                     lo, hi = wilson(*v)
                     row[k] = dict(k=v[0], n=v[1], p=v[0] / v[1], lo=lo, hi=hi)
             rows.append(row)
+    ctl = {r['panel']: r['rep'] for r in rows if r['shift'] == 'invisible'}
+    for r in rows:
+        if r['shift'] != 'invisible':
+            r.update(verdict(r['base'], r['rep'], ctl.get(r['panel']), INDIST.get(r['panel'])))
     return rows
+
+
+def verdict(base: dict, rep: dict, ctl: dict | None, indist: tuple | None) -> dict:
+    """The paper's rule on Wilson 95% bounds: a failure if base's upper bound is below the in-distribution
+    lower bound; head-limited if the retrained lower bound clears base's and the control's upper bounds."""
+    failure = indist is not None and base['hi'] < wilson(*indist)[0]
+    head = rep['lo'] > base['hi'] and (ctl is None or rep['lo'] > ctl['hi'])
+    return dict(failure=bool(failure), head_limited=bool(head))
 
 
 def figure(rows: list, out: str) -> None:
@@ -77,7 +93,7 @@ def figure(rows: list, out: str) -> None:
     np.atleast_1d(axes)[0].set_ylabel('success')
     np.atleast_1d(axes)[0].set_ylim(-0.03, 1.03)
     from interp_figs import legend_handle
-    fig.legend(handles=[legend_handle('0.45', 'base', inside=False), legend_handle(BLUE, 'readout refit')],
+    fig.legend(handles=[legend_handle('0.45', 'base', inside=False), legend_handle(BLUE, 'head retrained')],
                loc='outside lower center', ncol=2, frameon=False, fontsize=7)
     save(fig, 'fig_grid', out)
 
@@ -94,11 +110,11 @@ def fig_depth(out: str, root: str = 'outputs/interp/nuis/') -> None:
     rounds = [('0', 'sq_eval3_base_bothcam', 'sq_eval3_base_none')] + [
         (str(k), f'sq_depth_full{"" if k == 1 else f"_r{k}"}_eval3_bothcam',
          f'sq_depth_full{"" if k == 1 else f"_r{k}"}_eval3_none') for k in range(1, 6)]
-    depth = [('last layer\n5K', 'sq_depth_head_r4'), ('rank 8, all\n457K', 'sq_depth_all8_r4'),
+    depth = [('head only\n5K', 'sq_depth_head_r4'), ('LoRA r=8, all\n457K', 'sq_depth_all8_r4'),
              ('full\n51.6M', 'sq_depth_full_r4')]
     fig, (a, b) = plt.subplots(1, 2, figsize=(SINGLE * 2, 2.1), sharey=True,
                                constrained_layout=True)
-    for j, (name, color, fill) in enumerate((('under the shift', BLUE, True), ('unshifted', '0.45', False))):
+    for j, (name, color, fill) in enumerate((('perturbed', BLUE, True), ('in distribution', '0.45', False))):
         pts = [(k, rate(root + (sh if j == 0 else un))) for k, sh, un in rounds]
         pts = [(int(k), v) for k, v in pts if v]
         for x, v in pts:
@@ -115,16 +131,16 @@ def fig_depth(out: str, root: str = 'outputs/interp/nuis/') -> None:
                 b.errorbar(i + (0.1 if j else -0.1), p_, yerr=[[max(0, p_ - lo)], [max(0, hi - p_)]],
                            fmt='o', color=color, ms=3.5, lw=0.8, capsize=1.5,
                            markerfacecolor=color if fill else 'none', zorder=3)
-    a.set_xlabel('DAgger round (full refit)')
+    a.set_xlabel('DAgger iteration (full fine-tuning)')
     a.set_ylabel('success')
     a.set_ylim(-0.03, 1.03)
-    a.set_title('rounds of on-policy labels')
+    a.set_title('DAgger iterations')
     b.set_xticks(range(len(depth)), [d for d, _ in depth])
     b.set_xlim(-0.5, len(depth) - 0.5)
-    b.set_title('refit depth, same 4 rounds')
+    b.set_title('fine-tuning depth, same 4 iterations')
     for ax in (a, b):
         style(ax)
-    fig.legend(handles=[legend_handle(BLUE, 'under the shift'), legend_handle('0.45', 'unshifted', inside=False)],
+    fig.legend(handles=[legend_handle(BLUE, 'perturbed'), legend_handle('0.45', 'in distribution', inside=False)],
                loc='outside lower center', ncol=2, frameon=False, fontsize=7)
     save(fig, 'fig_depth', out)
 
@@ -138,7 +154,9 @@ def main() -> None:
     for r in rows:
         print(f"{r['panel']:26s} {r['shift']:13s} base {r['base']['k']:3d}/{r['base']['n']:<3d} "
               f"repaired {r['rep']['k']:3d}/{r['rep']['n']:<3d}"
-              + (f" unshifted {r['rep_none']['k']}/{r['rep_none']['n']}" if 'rep_none' in r else ''))
+              + (f" unshifted {r['rep_none']['k']}/{r['rep_none']['n']}" if 'rep_none' in r else '')
+              + ('' if 'failure' not in r else ' ' + ('head-limited' if r['head_limited'] else 'not head-limited')
+                 + ('' if r['failure'] else ' (no failure)')))
     with open(args.json, 'w') as f:
         json.dump(rows, f, indent=1)
     if rows:
