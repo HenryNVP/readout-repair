@@ -1,4 +1,5 @@
-# Pinned to the versions the paper's results were produced with (Python 3.10).
+# Pinned to the versions the paper's results were produced with (Python 3.10), except scipy and
+# numba: the original runs used Ubuntu 22.04's apt scipy (system LAPACK), which pip cannot install.
 # Installed by scripts/setup_env.sh, which also installs three packages with --no-deps that a
 # requirements file cannot express: robosuite==1.4.1 and lerobot==0.3.3 (both pull pynput, a
 # teleop-only dep whose evdev build fails without kernel headers) and robomimic==0.2.0 (its
@@ -7,8 +8,8 @@ torch==2.7.1           # setup_env.sh installs the cu128 build first (Blackwell 
 torchvision==0.22.1
 numpy==1.26.4
 mujoco==2.3.7          # robosuite 1.4.1 only: 1.5.x corrupts multi-camera renders
-scipy<1.15
-numba
+scipy==1.14.1          # robosuite's controller inverts matrices through numba -> scipy LAPACK: the scipy build sets the low-order bits
+numba==0.68.1
 opencv-python==4.11.0.86
 pillow>=10.4
 pyyaml

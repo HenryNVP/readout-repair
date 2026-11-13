@@ -33,6 +33,13 @@ source ~/evh_env.sh                # activates the venv, sets MUJOCO_GL (egl, el
 
 `scripts/remote_run.sh` runs the same setup on a rented GPU box (with `EVH_APT=1` for the GL libraries).
 
+How close a rerun gets: the venv is deterministic (two runs, bit-identical), and on two ACT Lift
+evals (`cam=0,0.06,0,0` and `cam=0,0,0,30;wroll=90`, 20 episodes each) it matched the recorded
+success counts and every episode's outcome and length. Trajectories agree to ~1e-5 on short
+episodes but drift on long failing ones: the original runs used Ubuntu's apt scipy, whose LAPACK
+(reached through robosuite's numba-compiled controller) differs from the pip wheel's in the last
+bits of the torques. Expect identical outcomes almost always, not bit-identical trajectories.
+
 ## Run
 
 ```bash
