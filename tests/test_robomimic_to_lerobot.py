@@ -80,8 +80,7 @@ def test_derive_absolute_zero_delta_commands_the_current_pose():
     degrees about z — commanding the reported frame instead makes the arm fight a 90-degree twist
     for the whole episode (measured: 0/10 on Lift, vs 7/10 for the same demos as deltas).
     """
-    from evh_controller.rotation import axisangle_to_matrix
-    from evh_reactive.transforms import quat_mul
+    from rotation import axisangle_to_matrix, quat_mul
 
     pos = np.array([[0.1, -0.2, 1.0]])
     actions = np.zeros((1, 7))
@@ -90,7 +89,7 @@ def test_derive_absolute_zero_delta_commands_the_current_pose():
 
     expected = quat_mul(np.array([0.0, 0.0, 0.0, 1.0]), EEF_TO_CONTROL_QUAT)
     got = axisangle_to_matrix(out[0, 3:6])
-    from evh_reactive.transforms import axisangle_to_quat, quat_to_axisangle
+    from rotation import axisangle_to_quat, quat_to_axisangle
     assert np.allclose(got, axisangle_to_matrix(quat_to_axisangle(expected)), atol=1e-9)
     assert np.allclose(axisangle_to_quat(out[0, 3:6])[:3] @ np.array([0.0, 0.0, 1.0]),
                        -np.sin(np.pi / 4), atol=1e-9)        # the -90 deg z twist, explicitly

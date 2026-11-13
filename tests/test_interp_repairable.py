@@ -4,8 +4,8 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
-from interp_repairable import scores  # noqa: E402
 from interp_nuisance import parse, roll_quat, yaw_quat  # noqa: E402
+from interp_repairable import scores  # noqa: E402
 
 
 def fake(n_eps, rng, code):

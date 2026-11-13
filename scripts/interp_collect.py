@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Interp step 0: roll out DP (or ACT, --backend act) on Square (or Lift, --task lift) and log, per control tick, what the policy saw next to the
-sim's ground truth (docs/interp-plan.md).
+"""Roll a policy out (ACT, Diffusion Policy or SmolVLA; Lift, Square or ToolHang), optionally under a
+perturbation (--nuisance) or an object offset (--shift), and log per control tick what the policy
+saw next to the sim's ground truth, plus the labels a head retrain needs (--selflabel cf: the
+policy's own chunk on the same state rendered without the perturbation; --teacher: another ACT's
+chunk).
 
-Per tick: `global_cond` (the obs encoder's output, the only thing the denoiser is conditioned on;
-for the robomimic Square checkpoint 2 obs steps x [agentview 64 | wrist 64 | proprio 9]), the
-executed command, and the state: eef pose, gripper, nut pose, held, on_peg. Per episode: success
-and the square_failures class (Lift: success / fail). One compressed .npz per episode in --out-dir.
-nut_pos / nut_quat are the task object's pose (the cube on Lift); feats are saved for DP only.
+Per tick: the executed command and the state (eef pose, gripper, object pose; Square: held,
+on_peg); DP: `global_cond` (the obs encoder's output, what the denoiser is conditioned on); ACT
+with labels: the head input `dec` and the label. Per episode: success. One compressed .npz per
+episode in --out-dir. nut_pos / nut_quat are the task object's pose (the cube on Lift).
 
-The rollout is sil_step's own loop (synchronous, d = 1), so episodes match the paper-2 harness.
-The encoder is run once more per tick on the same stacked history the executor gets; it does
-not touch the rollout (eval-mode crop is a centre crop, so it is deterministic).
+The rollout is rollout.run_episode (synchronous chunks). The encoder is run once more per tick on
+the same stacked history the policy gets; it does not touch the rollout (eval-mode crop is a
+centre crop, so it is deterministic).
 
     python3 scripts/interp_collect.py --out-dir outputs/interp/dp_square --episodes 200
 """
@@ -23,10 +25,17 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import sil_step  # noqa: E402  (puts the ROS-free packages on sys.path)
-import oracle_square as sq  # noqa: E402
-import square_failures  # noqa: E402
-from interp_gainmap import TASKS  # noqa: E402
+from interp_gainmap import TASKS, is_held, on_peg  # noqa: E402
+from rollout import (  # noqa: E402
+    CONTROL_HZ,
+    REPO,
+    data_arrays,
+    frames,
+    observe,
+    run_episode,
+    set_object,
+    stack,
+)
 
 
 class Recorder:
@@ -46,8 +55,8 @@ class Recorder:
 
 
 def encode(policy, stacked: dict, encoder=None) -> np.ndarray:
-    """global_cond for one stacked history, exactly as predict_inpaint builds it (`encoder`
-    swaps in another obs encoder of the same shape, e.g. an untrained control)."""
+    """global_cond for one stacked history, as the DP policy builds it (`encoder` swaps in another
+    obs encoder of the same shape)."""
     import torch
     dp = policy._policy
     encoder = encoder or dp.obs_encoder
@@ -63,9 +72,9 @@ def state(o, task=TASKS['square']) -> dict:
          'grip': o['robot0_gripper_qpos'], 'nut_pos': o[task['pos']],
          'nut_quat': o[task['quat']]}
     if task is TASKS['square']:
-        s['held'] = sq.is_held(o['robot0_eef_pos'], o['robot0_gripper_qpos'],
-                               o['SquareNut_pos'], o['SquareNut_quat'])
-        s['on_peg'] = sq.on_peg(o['SquareNut_pos'])
+        s['held'] = is_held(o['robot0_eef_pos'], o['robot0_gripper_qpos'],
+                            o['SquareNut_pos'], o['SquareNut_quat'])
+        s['on_peg'] = on_peg(o['SquareNut_pos'])
     return s
 
 
@@ -74,7 +83,6 @@ def place(env, obs, shift, task=TASKS['square']):
     the policy's first frame already shows it there."""
     if not shift.any():
         return obs
-    from dp_anchor_probe import observe, set_object
     set_object(env, task['joint'], np.asarray(obs[task['pos']][:2]) + shift[:2])
     if len(shift) > 2 and shift[2]:
         sim = env.sim
@@ -96,8 +104,7 @@ def self_label(env, policy, obs, batch, task, delta: float = 0.01, full: bool = 
     sim is restored bitwise after each counterfactual (as interp_gainmap.probe). full: rescale
     each axis's slope so the chunk's last row follows that axis fully (gain 1)."""
     import torch
-    from dp_anchor_probe import observe, set_object
-    from fuzzy_gate import _data_arrays
+
     from interp_act_sites import forward
     act = policy._model
     xy = np.asarray(obs[task['pos']][:2], float)
@@ -107,11 +114,11 @@ def self_label(env, policy, obs, batch, task, delta: float = 0.01, full: bool = 
             return forward(act, batch)[0].cpu().numpy()
     c = np.clip(xy, lo + delta, hi - delta)
     d = env.sim.data
-    saved = _data_arrays(d)
+    saved = data_arrays(d)
 
     def chunk_at(p):
         set_object(env, task['joint'], p)
-        b = policy._obs_to_batch(sil_step.stack([sil_step.frames(observe(env))], True))
+        b = policy._obs_to_batch(stack([frames(observe(env))], True))
         for k, v in saved.items():
             cur = getattr(d, k)
             if cur.shape == v.shape:
@@ -134,10 +141,9 @@ def cf_label(env, policy, nuis, backend: str = 'act') -> np.ndarray:
     the same state rendered without the shift. DP: its full horizon ('action_pred', both history
     frames showing the shift-free render)."""
     import torch
-    from dp_anchor_probe import observe
     if nuis is not None:
         nuis.off(env)
-    stacked = sil_step.stack([sil_step.frames(observe(env))] * policy.n_obs_steps, True)
+    stacked = stack([frames(observe(env))] * policy.n_obs_steps, True)
     if nuis is not None:
         nuis.on(env)
     with torch.no_grad():
@@ -164,8 +170,6 @@ def main() -> None:
     p.add_argument('--shift', default='0,0',
                    help='dx,dy[,dyaw_deg]: move (m) and turn the nut at reset, before the first '
                         'frame (use --shift=-0.02,0: a leading minus reads as an option)')
-    p.add_argument('--corrector', default='',
-                   help='interp_corrector label files: run the corrected policy')
     p.add_argument('--teacher', default='',
                    help="ACT only: also save the policy's head inputs and this ACT's chunk at every "
                         'prediction (labels for interp_edit --onpolicy)')
@@ -181,31 +185,23 @@ def main() -> None:
                         '(agentview, wrist, proprio) for deeper repairs (interp_edit --images)')
     p.add_argument('--label-every', type=int, default=1,
                    help='DP --selflabel cf: label every n-th tick (rows say which: label_tick)')
-    p.add_argument('--oracle', action='store_true',
-                   help="correct with the sim's true mistake instead (upper bound)")
     args = p.parse_args()
     shift = np.array([float(v) for v in args.shift.split(',')])
     task = TASKS[args.task]
-    weights = args.weights or os.path.join(sil_step._REPO, 'checkpoints', task['ckpt'])
+    weights = args.weights or os.path.join(REPO, 'checkpoints', task['ckpt'])
 
-    from evh_controller.policy import make_policy
-    from evh_plant.env_factory import EnvSpec, build_env
+    from env_factory import EnvSpec, build_env
+    from policy import make_policy
 
     os.makedirs(args.out_dir, exist_ok=True)
     policy = make_policy(args.backend, weights, denoise_steps=args.denoise_steps)
-    built = build_env(EnvSpec(env_name=task['env'], action_hz=sil_step.CONTROL_HZ,
+    built = build_env(EnvSpec(env_name=task['env'], action_hz=CONTROL_HZ,
                               max_episode_s=args.deadline_s + 1.0, seed=args.seed,
                               absolute_actions=policy.absolute_actions))
     env = built.env
-    if args.corrector or args.oracle:
-        from dp_anchor_probe import observe
-        from interp_corrector import Corrected, load_fix, mistake
-        inner = policy
-        fix = ((lambda g: mistake(env, inner, observe(env), 0)[None]) if args.oracle
-               else load_fix(args.corrector))
-        policy = Corrected(policy, fix)
     if (args.teacher or args.selflabel) and args.backend == 'act':
         import torch
+
         from interp_act_sites import Sites, forward
         sites = Sites(policy._model)
         teacher = make_policy('act', args.teacher)._model if args.teacher else None
@@ -219,13 +215,10 @@ def main() -> None:
     def fresh(o):
         """Reset observation with the nuisance applied (the model is rebuilt each reset)."""
         if nuis is not None:
-            from dp_anchor_probe import observe
             nuis.on(env)
             o = observe(env)
         return place(env, o, shift, task)
     obs = fresh(built.obs)
-    worker = sil_step.StepWorker(policy, sil_step.fixed_delay(1))
-    executor = sil_step.make_strategy('synchronous', worker, policy)
     wins = 0
     for scene in range(args.episodes):
         if scene >= args.first_scene:
@@ -233,7 +226,7 @@ def main() -> None:
             feats, states, heads, labels, label_ticks, seen = [], [], [], [], [], []
 
             def stack_fn(hist, needs_wrist):
-                stacked = sil_step.stack(hist, needs_wrist)
+                stacked = stack(hist, needs_wrist)
                 if args.backend == 'dp':
                     feats.append(encode(policy, stacked))
                 if args.selflabel == 'cf' and args.backend == 'smolvla':
@@ -274,20 +267,15 @@ def main() -> None:
                 states.append(state(rec.obs, task))
                 return stacked
 
-            ep = sil_step.run_episode(rec, obs, policy, executor, worker,
-                                      deadline_ticks=int(args.deadline_s * sil_step.CONTROL_HZ),
-                                      absolute=policy.absolute_actions, stack_fn=stack_fn)
+            ep = run_episode(rec, obs, policy, deadline_ticks=int(args.deadline_s * CONTROL_HZ),
+                             absolute=policy.absolute_actions, stack_fn=stack_fn)
             states.append(state(rec.obs, task))     # the state after the last step
             cols = {k: np.array([s[k] for s in states]) for k in states[0]}
             cmds = np.array(rec.commands)
-            nut0 = cols['nut_pos'][0]
-            cls = (square_failures.classify(cols['held'][1:], cols['nut_pos'][1:],
-                                            cols['on_peg'][1:], ep.success, cmds[:, 6] > 0,
-                                            nut0[2], sq.PEG) if args.task == 'square' else
-                   {'cls': 'success' if ep.success else 'fail'})
+            cls = 'success' if ep.success else 'fail'
             np.savez_compressed(os.path.join(args.out_dir, f'ep{scene:04d}.npz'),
                                 feats=np.array(feats), commands=cmds, success=ep.success,
-                                cls=cls['cls'], ticks=ep.ticks, shift=shift, task=args.task,
+                                cls=cls, ticks=ep.ticks, shift=shift, task=args.task,
                                 nuisance=args.nuisance,
                                 **cols, **({'dec': np.array(heads)} if heads else {}),
                                 **({'teacher': np.array(labels)} if labels else {}),
@@ -297,9 +285,7 @@ def main() -> None:
                                     'proprio': np.array([x[2] for x in seen], np.float32)}
                                    if seen else {}))
             wins += ep.success
-            print(f'scene {scene}: {cls["cls"]} ticks={ep.ticks} '
-                  f'corrected={getattr(policy, "applied", 0)} '
-                  f'({wins}/{scene - args.first_scene + 1})', flush=True)
+            print(f'scene {scene}: {cls} ticks={ep.ticks} ({wins}/{scene - args.first_scene + 1})', flush=True)
         obs = fresh(env.reset())
     env.close()
 

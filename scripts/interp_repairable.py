@@ -27,14 +27,14 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import interp_probe as ip  # noqa: E402
+from stats import group_cv, ridge_fit  # noqa: E402
 
 
 def grasp_xy(e, idx) -> np.ndarray:
     """Where the gripper must go: the cube / tool position, or on Square the nut's handle (it
     swings with the nut's yaw)."""
     if str(e['task']) == 'square':
-        from oracle_square import handle_pos
+        from interp_gainmap import handle_pos
         return np.stack([handle_pos(e['nut_pos'][i], e['nut_quat'][i])[:2] for i in idx])
     return e['nut_pos'][idx, :2]
 
@@ -77,9 +77,9 @@ def scores(base, shifted) -> dict:
     Xb, Yb, Gb = base
     Xs, Ys, Gs = shifted
     X, Y, G = np.vstack([Xb, Xs]), np.vstack([Yb, Ys]), np.r_[Gb, Gs + Gb.max() + 1]
-    pred = ip.group_cv(X, Y, G)
+    pred = group_cv(X, Y, G)
     n = len(Xb)
-    tr = ip.ridge_fit(Xb, Yb)(Xs)
+    tr = ridge_fit(Xb, Yb)(Xs)
     return {'joint': r2(pred[n:], Ys), 'base': r2(pred[:n], Yb), 'transfer': r2(tr, Ys),
             'joint_mm': rmse(pred[n:], Ys), 'base_mm': rmse(pred[:n], Yb), 'transfer_mm': rmse(tr, Ys)}
 

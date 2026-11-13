@@ -28,7 +28,6 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import sil_step  # noqa: E402,F401  (puts the ROS-free packages on sys.path)
 from robomimic_to_lerobot import STATE_KEYS, sorted_demos  # noqa: E402
 
 AUG = 'outputs/interp/aug'
@@ -48,7 +47,8 @@ SITES = {                                    # name -> (module path under ACT.mo
 def load(path: str, pick) -> list[dict]:
     """Episodes of a replay HDF5 for which pick(source rank, shift) is true."""
     import h5py
-    from evh_controller.rotation import abs7_to_abs10
+
+    from rotation import abs7_to_abs10
     eps = []
     with h5py.File(path, 'r') as f:
         data = f['data']
@@ -251,6 +251,7 @@ def relu_edit(args, act, pres, run, dev) -> int:
     the FFN input: xy rows towards transplant_rows' labels (the parent's own in-range slope
     extended), every other output and the parent's training states (keep) unchanged."""
     import torch
+
     from interp_gainmap import TASKS
     d = dict(np.load(args.relu))
     L, dn, head = act.model.decoder.layers[0], act.model.decoder.norm, act.model.action_head
@@ -317,33 +318,10 @@ def relu_edit(args, act, pres, run, dev) -> int:
     return int(4 * (2 * X.shape[1] + 1))
 
 
-def report(sweep: str) -> None:
-    """Validation per-axis gain (interp_ci.axis_stat) for every gm_<name>.npz in the sweep dir,
-    with the edit's held-out replay error and parent drift; sorted by out-of-range x at 2 cm."""
-    import glob
-    from interp_ci import axis_parts, axis_stat
-    rows = []
-    for f in glob.glob(f'{sweep}/gm_*.npz'):
-        name = os.path.basename(f)[3:-4]
-        a = dict(np.load(f))
-        g = {r: axis_stat(*axis_parts(a, r)) for r in sorted(set(a['radius']))}
-        e = os.path.join(sweep, name, 'edit.json')
-        st = json.load(open(e)) if os.path.exists(e) else {}
-        rows.append((name, g, st))
-    print(f'{"config":28s} {"2 cm in x/y":>12s} {"out x/y":>12s} {"6 cm in x/y":>12s} {"out x/y":>12s}'
-          f' {"val err":>8s} {"drift":>6s} {"params":>7s}')
-    for name, g, st in sorted(rows, key=lambda r: -r[1][min(r[1])][2]):
-        lo, hi = g[min(g)], g[max(g)]
-        print(f'{name:28s} {lo[0]:5.2f}/{lo[1]:5.2f}  {lo[2]:5.2f}/{lo[3]:5.2f}  {hi[0]:5.2f}/{hi[1]:5.2f}  '
-              f'{hi[2]:5.2f}/{hi[3]:5.2f}  {st.get("val_err_after", np.nan):7.4f} '
-              f'{st.get("drift_after", np.nan):6.4f} {st.get("params", 0):7d}')
-
-
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument('--parent', help='ACT pretrained_model dir (the base arm)')
     p.add_argument('--out')
-    p.add_argument('--report', default='', help='sweep dir: table of gm_<name>.npz + edit.json')
     p.add_argument('--site', default='head', choices=sorted(SITES) + ['all', 'full'])
     p.add_argument('--rank', type=int, default=2)
     p.add_argument('--axis', choices=('x', 'y'), default='x')
@@ -372,12 +350,10 @@ def main() -> None:
     p.add_argument('--transplant', default='',
                    help='interp_act_sites npz of the parent: closed-form label-free head edit')
     args = p.parse_args()
-    if args.report:
-        return report(args.report)
 
     import torch
-    import torch.nn.utils.parametrize as P
-    from evh_controller.policy import make_policy
+
+    from policy import make_policy
     torch.manual_seed(args.seed)
     act = make_policy('act', args.parent)._model.eval()
     dev = next(act.parameters()).device

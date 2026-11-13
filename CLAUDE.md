@@ -1,16 +1,17 @@
 # CLAUDE.md
 
-The interp paper ("Readout or Representation?") and only the code its experiments import, moved
-out of edge-vla-hil. See `README.md` for layout and run commands. The running log and next steps
+The paper "Head or Representation?" and only the code its experiments use, moved out of
+edge-vla-hil. See `README.md` for layout and run commands. The running log and next steps
 are in `docs/interp-plan.md` (local only, excluded from git).
 
 ## Build & test
 
 No build, no Docker. `bash scripts/setup_env.sh` makes `.venv` (pins in `requirements.txt`);
-`source ~/evh_env.sh` activates it. `tests/conftest.py` and the scripts put `ros2_ws/src/<pkg>`
-and `scripts/` on `sys.path`; keep files at these paths. Run tests inside the venv: the
-system Python has edge-vla-hil pip-installed in editable mode, so a missing module can
-silently import from the old repo there.
+`source ~/evh_env.sh` activates it. Everything is flat in `scripts/` (experiments and the library
+modules they share: `policy`, `dp_repo_policy`, `env_factory`, `rotation`, `rollout`, `stats`);
+scripts import each other by module name. Run tests inside the venv: the system Python has
+edge-vla-hil pip-installed in editable mode, so a missing module can silently import from the
+old repo there.
 
 ```bash
 python3 -m pytest -q
@@ -30,16 +31,18 @@ in scripts so the suite stays fast.
 2. **In absolute mode a zero action means "go to the world origin".** Any default/hold action must
    be mode-aware: use `env_factory.hold_action`.
 3. **Absolute rotation is 6D, never axis-angle** (Lift targets sit at the pi wrap and flip sign
-   frame to frame). Conversions live in `evh_controller/rotation.py`.
+   frame to frame). Conversions live in `scripts/rotation.py`.
 4. **Absolute orientation targets are in the OSC tool frame**: `R_controller = R_eef_quat @
    Rz(-90 deg)` (`EEF_TO_CONTROL_QUAT` in `env_factory`). Deltas are immune.
 5. **robosuite 1.4.1 + mujoco 2.3.7 only** (1.5.x corrupts multi-camera renders).
 6. **Touch the robosuite env only from the thread that built it** (thread-bound EGL context).
-7. **The control rate must divide MuJoCo's 2 ms timestep** (`env_factory.check_timebase`).
+7. **Rollouts must stay bit-reproducible**: `rollout.run_episode` requests each chunk on the tick
+   its predecessor runs out, even when the episode then ends, so a stochastic policy (DP) draws
+   the same random numbers. Reordering predict calls changes every DP result.
+8. **The control rate must divide MuJoCo's 2 ms timestep** (`env_factory.check_timebase`).
 
 ## Conventions
 
 - Dense module docstrings that explain why; terse comments only where code is subtle.
 - Commit messages: short subject line only.
-- Every results file gets a `.manifest.json` (`scripts/run_manifest.py`).
 - Long runs: launch in the background and get notified; don't poll.

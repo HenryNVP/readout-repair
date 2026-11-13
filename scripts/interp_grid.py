@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Interp A across policies and tasks: success before and after the readout repair, per shift,
-with Wilson 95% intervals, from the fresh-scene eval dirs (env seed 3) the pipelines write:
-<prefix>eval3_base_<shift>, <prefix>eval3_rep_<shift>, <prefix>eval3_rep_<shift>_none.
-Writes outputs/interp/grid.json and figs/fig_grid.{pdf,png}: one panel per policy and task,
-shifts along x, base (hollow) and repaired (filled), the invisible-object control last.
+"""The paper's tables and depth figure, from the rollout dirs the pipeline/ stages write.
 
-    python3 scripts/interp_grid.py
+  --table position   Table 1: success per axis (cube ±5/±7 cm) and unshifted, per arm
+  --table perturb    Table 2: base -> head retrained per policy, task and perturbation, with
+                     Wilson 95% intervals and the decision rule's verdict; writes grid.json
+  --table severity   Table 3: Square under weaker perturbations, dev sweep and test cells
+  --table depth      Figure 3: paper/figs/fig_depth.pdf
+
+    python3 scripts/interp_grid.py --table all
 """
 from __future__ import annotations
 
@@ -18,16 +20,31 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from plot_sweep import wilson  # noqa: E402
+from stats import wilson  # noqa: E402
 
-PANELS = (('ACT, Lift', 'outputs/interp/nuis/', ''), ('Diffusion Policy, Lift', 'outputs/interp/nuis/', 'dp_'),
-          ('SmolVLA, Lift', 'outputs/interp/remote2/', ''), ('ACT, Square', 'outputs/interp/nuis/', 'sq_'),
-          ('Diffusion Policy, Square', 'outputs/interp/nuis/', 'dpsq_'),
-          ('ACT, ToolHang', 'outputs/interp/nuis/', 'th_'))
-# in-distribution base success (k, n), for the failure rule: lift_act_base_s3_shift_0,0, DP Lift and ToolHang
-# dev runs (docs), remote2/pos_0,0, <prefix>eval3_base_none
+O = 'outputs/interp/'
+N = O + 'nuis/'
+PANELS = (('ACT, Lift', N, ''), ('Diffusion Policy, Lift', N, 'dp_'), ('SmolVLA, Lift', N, 'vla_'),
+          ('ACT, Square', N, 'sq_'), ('Diffusion Policy, Square', N, 'dpsq_'), ('ACT, ToolHang', N, 'th_'))
+# in-distribution base success, the failure rule's reference: these dirs when they exist, else the
+# (k, n) the paper used (DP Lift and ToolHang from development runs)
+INDIST_DIRS = {'ACT, Lift': O + 'lift_act_base_s3_shift_0,0'}
 INDIST = {'ACT, Lift': (100, 100), 'Diffusion Policy, Lift': (100, 100), 'SmolVLA, Lift': (50, 50),
           'ACT, Square': (84, 100), 'Diffusion Policy, Square': (95, 100), 'ACT, ToolHang': (23, 50)}
+# Table 1 arms: (label, rollout name, axis or None for both); dirs are lift_<name>_s3_shift_<offset>
+POSITION = (('ACT base', 'act_base', None),
+            ('full retrain, 400 shifted demos', 'act_xaug', 'x'), ('', 'act_yaug', 'y'),
+            ('head retrain, DAgger expert labels', 'act_edit_x_onpolicy_head_r2', 'x'),
+            ('', 'act_edit_y_onpolicy_head_r2', 'y'),
+            ('head retrain, pseudo-labels, no demos', 'act_edit_slfull_b3', None),
+            ('head retrain, in-distribution labels', 'act_edit_x_head_r10_b1_unsh', None),
+            ('SmolVLA base', 'vla_base', None),
+            ('head retrain, DAgger expert labels', 'vla_rep_xpos', 'x'), ('', 'vla_rep_ypos', 'y'))
+AXES = {'x': ('-0.07,0', '-0.05,0', '0.05,0', '0.07,0'), 'y': ('0,-0.07', '0,-0.05', '0,0.05', '0,0.07')}
+# Table 3: dev sweep tags (sqbase_ / dpsqbase_, seed 0) and the cells taken to test
+SEVERITY = (('none', 'none'), ('faint', 'object opacity 0.1'), ('faint03', 'object opacity 0.3'),
+            ('faint05', 'object opacity 0.5'), ('wroll90', 'wrist roll 90 only'),
+            ('cam10w30', 'turn 10 + roll 30'), ('light05', 'light x0.5'))
 SHIFTS = (('bothcam', 'turn + roll'), ('darkredwroll', 'red, dim + roll'), ('bothflip', 'upside down'),
           ('bothzoom', 'zoomed'), ('faint', 'faint object'), ('invisible', 'invisible object'))
 
@@ -38,6 +55,13 @@ def rate(d: str):
     if not fs:
         return None
     return int(sum(bool(np.load(f)['success']) for f in fs)), len(fs)
+
+
+def indist(panel: str, root: str, pre: str):
+    for d in (INDIST_DIRS.get(panel, ''), f'{root}{pre}eval3_base_none'):
+        if d and rate(d):
+            return rate(d)
+    return INDIST.get(panel)
 
 
 def collect(panels=PANELS, shifts=SHIFTS) -> list:
@@ -55,10 +79,53 @@ def collect(panels=PANELS, shifts=SHIFTS) -> list:
                     row[k] = dict(k=v[0], n=v[1], p=v[0] / v[1], lo=lo, hi=hi)
             rows.append(row)
     ctl = {r['panel']: r['rep'] for r in rows if r['shift'] == 'invisible'}
+    ref = {name: indist(name, root, pre) for name, root, pre in panels}
     for r in rows:
         if r['shift'] != 'invisible':
-            r.update(verdict(r['base'], r['rep'], ctl.get(r['panel']), INDIST.get(r['panel'])))
+            r.update(verdict(r['base'], r['rep'], ctl.get(r['panel']), ref.get(r['panel'])))
     return rows
+
+
+def pct(v) -> str:
+    return '  --' if v is None else f'{100 * v[0] / v[1]:4.0f}'
+
+
+def pooled(dirs) -> tuple | None:
+    vs = [v for v in map(rate, dirs) if v]
+    return (sum(k for k, _ in vs), sum(n for _, n in vs)) if vs else None
+
+
+def position() -> None:
+    print(f'{"Table 1: object position, Lift (%)":44s} {"x":>4s} {"y":>4s} {"in-dist.":>8s}')
+    for label, name, axis in POSITION:
+        cell = {a: pooled([f'{O}lift_{name}_s3_shift_{s}' for s in AXES[a]]) for a in AXES}
+        if axis:
+            cell = {a: (v if a == axis else None) for a, v in cell.items()}
+        print(f'{label or "":44s} {pct(cell["x"])} {pct(cell["y"])} {pct(rate(f"{O}lift_{name}_s3_shift_0,0")):>8s}'
+              f'   ({name})')
+
+
+def severity() -> None:
+    print(f'{"Table 3: Square, weaker perturbations (%)":36s} {"ACT dev":>7s} {"test":>9s}  {"DP dev":>6s} {"test":>9s}')
+    for tag, label in SEVERITY:
+        cells = []
+        for dev, pre in (('sqbase_', 'sq_'), ('dpsqbase_', 'dpsq_')):
+            base, rep = rate(f'{N}{pre}eval3_base_{tag}'), rate(f'{N}{pre}eval3_rep_{tag}')
+            test = f'{pct(base).strip()} -> {pct(rep).strip()}' if base and rep else '--'
+            cells.append(f'{pct(rate(N + dev + tag)):>7s} {test:>9s}')
+        print(f'{label:36s} ' + '  '.join(cells))
+
+
+def perturb(json_out: str) -> None:
+    rows = collect()
+    for r in rows:
+        print(f"{r['panel']:26s} {r['shift']:13s} base {r['base']['k']:3d}/{r['base']['n']:<3d} "
+              f"repaired {r['rep']['k']:3d}/{r['rep']['n']:<3d}"
+              + (f" unshifted {r['rep_none']['k']}/{r['rep_none']['n']}" if 'rep_none' in r else '')
+              + ('' if 'failure' not in r else ' ' + ('head-limited' if r['head_limited'] else 'not head-limited')
+                 + ('' if r['failure'] else ' (no failure)')))
+    with open(json_out, 'w') as f:
+        json.dump(rows, f, indent=1)
 
 
 def verdict(base: dict, rep: dict, ctl: dict | None, indist: tuple | None) -> dict:
@@ -69,42 +136,30 @@ def verdict(base: dict, rep: dict, ctl: dict | None, indist: tuple | None) -> di
     return dict(failure=bool(failure), head_limited=bool(head))
 
 
-def figure(rows: list, out: str) -> None:
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    from interp_figs import BLUE, DOUBLE, save, style
-    plt.rcParams.update({'font.size': 8, 'axes.labelsize': 8, 'axes.titlesize': 8,
-                         'xtick.labelsize': 7, 'ytick.labelsize': 7})
-    panels = [p for p, _, _ in PANELS if any(r['panel'] == p for r in rows)]
-    fig, axes = plt.subplots(1, len(panels), figsize=(DOUBLE, 2.3), sharey=True, constrained_layout=True)
-    for ax, p in zip(np.atleast_1d(axes), panels):
-        rs = [r for r in rows if r['panel'] == p]
-        for i, r in enumerate(rs):
-            for k, color, fill, dx in (('base', '0.45', False, -0.12), ('rep', BLUE, True, 0.12)):
-                v = r[k]
-                ax.errorbar(i + dx, v['p'], yerr=[[max(0.0, v['p'] - v['lo'])], [max(0.0, v['hi'] - v['p'])]], fmt='o',
-                            color=color, ms=3.5, lw=0.8, capsize=1.5, markeredgewidth=0.8,
-                            markerfacecolor=color if fill else 'none', zorder=3)
-        ax.set_xticks(range(len(rs)), [r['label'] for r in rs], rotation=60, ha='right', fontsize=6.5)
-        ax.set_xlim(-0.6, len(rs) - 0.4)
-        ax.set_title(p, fontsize=7.5)
-        style(ax)
-    np.atleast_1d(axes)[0].set_ylabel('success')
-    np.atleast_1d(axes)[0].set_ylim(-0.03, 1.03)
-    from interp_figs import legend_handle
-    fig.legend(handles=[legend_handle('0.45', 'base', inside=False), legend_handle(BLUE, 'head retrained')],
-               loc='outside lower center', ncol=2, frameon=False, fontsize=7)
-    save(fig, 'fig_grid', out)
+BLUE, SINGLE = '#0072B2', 3.4                  # perturbed colour; column width, in
 
 
-def fig_depth(out: str, root: str = 'outputs/interp/nuis/') -> None:
+def style(ax) -> None:
+    """Light y-only grid, no top/right spines."""
+    ax.grid(axis='y', color='0.87', lw=0.5)
+    ax.set_axisbelow(True)
+    for side in ('top', 'right'):
+        ax.spines[side].set_visible(False)
+    ax.tick_params(length=2.5, pad=2)
+
+
+def legend_handle(color: str, label: str, inside: bool = True):
+    from matplotlib.lines import Line2D
+    return Line2D([], [], ls='none', marker='o', ms=3.5, color=color, markeredgewidth=0.8,
+                  markerfacecolor=color if inside else 'none', label=label)
+
+
+def fig_depth(out: str, root: str = N) -> None:
     """Square, both cameras shifted: success under the shift and unshifted over DAgger rounds of
     the full refit (left), and the refit depth on the same four rounds of labels (right)."""
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from interp_figs import BLUE, SINGLE, save, style, legend_handle
     plt.rcParams.update({'font.size': 8, 'axes.labelsize': 8, 'axes.titlesize': 8,
                          'xtick.labelsize': 7, 'ytick.labelsize': 7})
     rounds = [('0', 'sq_eval3_base_bothcam', 'sq_eval3_base_none')] + [
@@ -142,26 +197,24 @@ def fig_depth(out: str, root: str = 'outputs/interp/nuis/') -> None:
         style(ax)
     fig.legend(handles=[legend_handle(BLUE, 'perturbed'), legend_handle('0.45', 'in distribution', inside=False)],
                loc='outside lower center', ncol=2, frameon=False, fontsize=7)
-    save(fig, 'fig_depth', out)
+    fig.savefig(os.path.join(out, 'fig_depth.pdf'))
+    plt.close(fig)
+    print(f'[fig] {out}/fig_depth.pdf')
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument('--json', default='outputs/interp/grid.json')
-    p.add_argument('--figs', default='outputs/interp/figs')
+    p.add_argument('--table', default='all', choices=('all', 'position', 'perturb', 'severity', 'depth'))
+    p.add_argument('--json', default=O + 'grid.json')
+    p.add_argument('--figs', default='paper/figs')
     args = p.parse_args()
-    rows = collect()
-    for r in rows:
-        print(f"{r['panel']:26s} {r['shift']:13s} base {r['base']['k']:3d}/{r['base']['n']:<3d} "
-              f"repaired {r['rep']['k']:3d}/{r['rep']['n']:<3d}"
-              + (f" unshifted {r['rep_none']['k']}/{r['rep_none']['n']}" if 'rep_none' in r else '')
-              + ('' if 'failure' not in r else ' ' + ('head-limited' if r['head_limited'] else 'not head-limited')
-                 + ('' if r['failure'] else ' (no failure)')))
-    with open(args.json, 'w') as f:
-        json.dump(rows, f, indent=1)
-    if rows:
-        figure(rows, args.figs)
-    if glob.glob('outputs/interp/nuis/sq_depth_full_r4_eval3_bothcam/ep*.npz'):
+    if args.table in ('all', 'position'):
+        position()
+    if args.table in ('all', 'perturb'):
+        perturb(args.json)
+    if args.table in ('all', 'severity'):
+        severity()
+    if args.table in ('all', 'depth') and glob.glob(N + 'sq_depth_full_r4_eval3_bothcam/ep*.npz'):
         fig_depth(args.figs)
 
 

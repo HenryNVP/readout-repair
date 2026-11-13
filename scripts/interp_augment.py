@@ -25,11 +25,11 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import sil_step  # noqa: E402
 from interp_gainmap import TASKS, make_env  # noqa: E402
 from robomimic_to_lerobot import STATE_KEYS, derive_absolute, osc_scales, sorted_demos  # noqa: E402
 
-SRC = '/home/henry/edge-vla-hil/data/robomimic/lift/ph/image.hdf5'   # main checkout, mounted ro
+SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'robomimic', 'lift', 'ph',
+                   'image.hdf5')
 CAMS = ('agentview_image', 'robot0_eye_in_hand_image')
 
 
