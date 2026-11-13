@@ -1,0 +1,25 @@
+# Pinned to the versions the paper's results were produced with (Python 3.10).
+# Installed by scripts/setup_env.sh, which also installs three packages with --no-deps that a
+# requirements file cannot express: robosuite==1.4.1 and lerobot==0.3.3 (both pull pynput, a
+# teleop-only dep whose evdev build fails without kernel headers) and robomimic==0.2.0 (its
+# egl_probe build dep fails on modern systems; we import only its model code, for DP).
+torch==2.7.1           # setup_env.sh installs the cu128 build first (Blackwell needs it)
+torchvision==0.22.1
+numpy==1.26.4
+mujoco==2.3.7          # robosuite 1.4.1 only: 1.5.x corrupts multi-camera renders
+scipy<1.15
+numba
+opencv-python==4.11.0.86
+pillow>=10.4
+pyyaml
+termcolor
+h5py
+matplotlib>=3.7        # figures use legend loc='outside ...'
+# Diffusion Policy checkpoints (external/diffusion_policy model code)
+hydra-core>=1.3,<1.4
+omegaconf>=2.3
+dill==0.3.8
+zarr<3
+psutil
+tensorboardX
+pytest

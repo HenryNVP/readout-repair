@@ -22,9 +22,8 @@ pose, gripper, nut pose) and is exactly as good as the observation it was planne
 The nut can ride the conveyor (oracle_lift.MovingCube with the nut's joint) until it is held.
 Anchoring tracks the nut's position. The peg is fixed, so only the grasp needs anchoring.
 
-    docker run --rm -v ~/edge-vla-hil:/ws edge-vla-hil:host \\
-        python3 /ws/scripts/oracle_square.py --strategies synchronous,noskip_async \\
-        --delays 1,10 --episodes 10 --out /ws/outputs/mech/sq_check.csv
+    python3 scripts/oracle_square.py --strategies synchronous,noskip_async \\
+        --delays 1,10 --episodes 10 --out outputs/mech/sq_check.csv
 """
 from __future__ import annotations
 

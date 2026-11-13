@@ -17,11 +17,10 @@ then the execution's, and the DP is brought back only to validate a mechanism th
                          real, controlled quantity (paper 1's world speed, here in m/s).
 
 Everything at module scope is numpy (the bare-box test suite imports it); robosuite is imported in
-`make_env` only. Run the sweep inside the host image:
+`make_env` only. Run the sweep in the env from scripts/setup_env.sh:
 
-    docker run --rm -v ~/edge-vla-hil:/ws edge-vla-hil:host \\
-        python3 /ws/scripts/oracle_lift.py --strategies synchronous,noskip_async \\
-        --delays 1,10,20 --speeds 0,0.02 --episodes 20 --out /ws/outputs/mech/check.csv
+    python3 scripts/oracle_lift.py --strategies synchronous,noskip_async \\
+        --delays 1,10,20 --speeds 0,0.02 --episodes 20 --out outputs/mech/check.csv
 """
 from __future__ import annotations
 
