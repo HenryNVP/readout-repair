@@ -16,8 +16,6 @@ from wifi_trace import (
     quantiles_ms,
 )
 
-from evh_latency.channel import GilbertElliott
-
 
 def test_loss_runs_counts_sent_and_groups_consecutive_gaps():
     sent, runs = loss_runs([0, 1, 4, 5, 9], first=0, last=10)
@@ -29,18 +27,6 @@ def test_nothing_lost_means_no_runs_and_no_invented_burst():
     sent, runs = loss_runs(list(range(20)), 0, 19)
     assert runs == []
     assert fit_gilbert(sent, runs, 0.05) == {'loss': 0.0, 'burst_ms': None, 'bursts': 0}
-
-
-def test_the_fit_recovers_a_known_gilbert_elliott_channel():
-    """Round trip through the relay's own model: sample it at 20 Hz, fit, get the knobs back."""
-    ge = GilbertElliott(loss=0.1, burst_ms=400.0, seed=4)
-    received = [i for i in range(40000) if not ge.bad(1000.0 + i * 0.05)]
-    sent, runs = loss_runs(received, 0, 39999)
-    fit = fit_gilbert(sent, runs, 0.05)
-
-    assert fit['loss'] == pytest.approx(0.1, abs=0.02)
-    # message-sampled runs slightly overstate a continuous outage (partial periods round up)
-    assert 350.0 < fit['burst_ms'] < 500.0
 
 
 def test_offset_is_recovered_from_symmetric_probes_despite_queueing():

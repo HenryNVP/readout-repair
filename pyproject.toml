@@ -48,7 +48,6 @@ known-first-party = [
     "evh_plant",
     "evh_controller",
     "evh_reactive",
-    "evh_latency",
     "robomimic_to_lerobot",   # scripts/ modules are ours too; tests import them by module name
     "stamp_act_checkpoint",
 ]

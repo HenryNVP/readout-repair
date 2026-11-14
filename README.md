@@ -99,7 +99,7 @@ execution) and modules, exactly as for the paper; only scripts the paper does no
 | probes | `interp_act_sites.py` (decodability and gain per ACT site, swap test), `interp_gainmap.py`, `interp_repairable.py` (probe R²), `stats.py` |
 | data | `robomimic_to_lerobot.py`, `interp_augment.py` (shifted demo replays), `interp_regen.py` (ToolHang images), `interp_demos_npz.py`, `stamp_act_checkpoint.py` |
 | tables and figures | `interp_grid.py` (Tables 1–3, Figure 3), `interp_nuisance.py` (Figure 2) |
-| environment | `setup_env.sh`, `remote_run.sh` (same setup on a rented GPU box); `run_manifest.py`, `wifi_trace.py` (used by the harness) |
+| environment | `setup_env.sh`; `run_manifest.py`, `wifi_trace.py` (used by the harness) |
 
 ## Setup
 
@@ -127,8 +127,7 @@ bash pipeline/5_depth.sh      # Figure 3 (LoRA / full fine-tuning, DAgger iterat
 bash pipeline/6_figures.sh    # Figure 2, and every table again
 ```
 
-Compute, roughly, on one 8 GB consumer GPU: training a day or two (SmolVLA wants a 16 GB card;
-`scripts/remote_run.sh` syncs the code to a rented box, sets it up and runs a `run.sh` there);
+Compute, roughly, on one 8 GB consumer GPU: training a day or two (SmolVLA wants a 16 GB card);
 stages 2–5 a few days in total, most of it Diffusion Policy and SmolVLA rollouts. Seeds are fixed (training scenes 1, 2, …; evaluation
 scenes 3, 4), so a rerun evaluates on the paper's scenes.
 

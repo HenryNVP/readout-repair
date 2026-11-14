@@ -14,7 +14,7 @@ _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SRC = os.path.join(_REPO, 'ros2_ws', 'src')
 
 # Put each package root on sys.path: ros2_ws/src/<pkg> -> import <pkg>.<module>
-for _pkg in ('evh_plant', 'evh_controller', 'evh_reactive', 'evh_latency', 'evh_bringup'):
+for _pkg in ('evh_plant', 'evh_controller', 'evh_reactive'):
     _path = os.path.join(_SRC, _pkg)
     if _path not in sys.path:
         sys.path.insert(0, _path)
