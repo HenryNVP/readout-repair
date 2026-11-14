@@ -47,7 +47,4 @@ X=$O/vla; mkdir -p $X
     --batch_size=16 --steps=30000 --save_freq=5000 --output_dir=$PWD/$X/smolvla_lift \
     --wandb.enable=false > $X/train.log 2>&1 \
   && echo 'lift the cube' > $VLA/instruction.txt; }
-
-# in-distribution success (Table 2, bottom row; ToolHang's is 46%)
-col $O/toolhang/eval_unshifted toolhang act $ACT_TH 0 50
 echo 'train ok'

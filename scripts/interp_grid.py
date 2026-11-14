@@ -26,11 +26,9 @@ O = 'outputs/interp/'
 N = O + 'nuis/'
 PANELS = (('ACT, Lift', N, ''), ('Diffusion Policy, Lift', N, 'dp_'), ('SmolVLA, Lift', N, 'vla_'),
           ('ACT, Square', N, 'sq_'), ('Diffusion Policy, Square', N, 'dpsq_'), ('ACT, ToolHang', N, 'th_'))
-# in-distribution base success, the failure rule's reference: these dirs when they exist, else the
-# (k, n) the paper used (DP Lift and ToolHang from development runs)
+# in-distribution base success, the failure rule's reference: <prefix>eval3_base_none, except ACT
+# Lift's, which is Table 1's unshifted base cell
 INDIST_DIRS = {'ACT, Lift': O + 'lift_act_base_s3_shift_0,0'}
-INDIST = {'ACT, Lift': (100, 100), 'Diffusion Policy, Lift': (100, 100), 'SmolVLA, Lift': (50, 50),
-          'ACT, Square': (84, 100), 'Diffusion Policy, Square': (95, 100), 'ACT, ToolHang': (23, 50)}
 # Table 1 arms: (label, rollout name, axis or None for both); dirs are lift_<name>_s3_shift_<offset>
 POSITION = (('ACT base', 'act_base', None),
             ('full retrain, 400 shifted demos', 'act_xaug', 'x'), ('', 'act_yaug', 'y'),
@@ -63,7 +61,7 @@ def indist(panel: str, root: str, pre: str):
     for d in (INDIST_DIRS.get(panel, ''), f'{root}{pre}eval3_base_none'):
         if d and rate(d):
             return rate(d)
-    return INDIST.get(panel)
+    return None
 
 
 def collect(panels=PANELS, shifts=SHIFTS) -> list:
