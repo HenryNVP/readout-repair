@@ -134,12 +134,17 @@ scenes 3, 4), so a rerun evaluates on the paper's scenes.
 How close a rerun gets:
 - **ACT rollouts, probes and head retrains are deterministic** in this venv (bit-identical run to
   run). On two ACT Lift evals (20 episodes each) a rerun matched the recorded success counts and
-  every episode's outcome and length. Trajectories agree to ~1e-5 on short episodes but drift on
+  every episode's outcome and length; on Square (3 episodes, 2026-11-14) outcomes matched but two
+  episodes ran 2 and 6 ticks longer. Trajectories agree to ~1e-5 on short episodes but drift on
   long failing ones: the original runs used Ubuntu's apt scipy, whose LAPACK (reached through
   robosuite's numba-compiled controller) differs from the pip wheel's in the last bits.
-- **Diffusion Policy and SmolVLA rollouts, and full or LoRA fine-tuning, are not**: GPU sampling
-  and training kernels differ run to run, as they did for the original runs. Neither is training
-  from scratch. Expect those cells within their confidence intervals, not the same counts.
+- **Diffusion Policy and SmolVLA rollouts are deterministic too, from 2026-11-14 on**:
+  `interp_collect` seeds torch per scene and forces deterministic kernels, so a rerun of a cell is
+  bit-identical (`REPLAY=1 python -m pytest tests/test_replay.py`). The recorded runs predate this
+  (unseeded noise), so for these policies a rerun is a fresh sample: expect the paper's cells within
+  their confidence intervals, not the same counts.
+- **Full or LoRA fine-tuning, and training from scratch, are not deterministic** (GPU training
+  kernels): same expectation.
 
 Paper:
 

@@ -179,6 +179,12 @@ def main() -> None:
     shift = np.array([float(v) for v in args.shift.split(',')])
     task = TASKS[args.task]
     weights = args.weights or os.path.join(sil_step._REPO, 'checkpoints', task['ckpt'])
+    # DP and SmolVLA sample noise from torch's RNG, and default GPU kernels are not bitwise
+    # repeatable: deterministic kernels plus a seed per scene make a rerun of scene k reproduce it
+    os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')   # before the first cuBLAS call
+    import torch
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cudnn.benchmark = False
 
     from evh_controller.policy import make_policy
     from evh_plant.env_factory import EnvSpec, build_env
@@ -190,8 +196,6 @@ def main() -> None:
                               absolute_actions=policy.absolute_actions))
     env = built.env
     if (args.teacher or args.selflabel) and args.backend == 'act':
-        import torch
-
         from interp_act_sites import Sites, forward
         sites = Sites(policy._model)
         teacher = make_policy('act', args.teacher)._model if args.teacher else None
@@ -214,6 +218,7 @@ def main() -> None:
     wins = 0
     for scene in range(args.episodes):
         if scene >= args.first_scene:
+            torch.manual_seed(args.seed * 100_000 + scene)
             rec = Recorder(env, obs)
             feats, states, heads, labels, label_ticks, seen = [], [], [], [], [], []
 
