@@ -1,7 +1,8 @@
 # Head or Representation?
 
 *Diagnosing Distribution-Shift Failures of Visuomotor Policies with Last-Layer Retraining*
-(paper source: [`paper/main.tex`](paper/main.tex), draft)
+
+Code and pipeline to reproduce the paper's results (the paper itself is not in this repo).
 
 Imitation-learned visuomotor policies fail under distribution shift, but a success rate does not
 say whether the failure is in the learned representation or in the action head that reads it, and
@@ -74,14 +75,15 @@ in-distribution success drops from 84% to 73%.
 point does not predict ACT's turn + roll exception, and Diffusion Policy loses it on Lift where the
 retrain still works. The retrain, not the probe, is the decisive measurement.
 
-**Still running:** whether partial-strength perturbations on Square are head-limited, i.e. whether
-the regime follows the task or the severity of the failure (`tab:severity` in the paper).
+**The regime follows the task, not the severity.** Weakening the perturbations until Square fails
+only partly does not change it: from 24–36% base success the head retrain adds at most 15 points
+on Square, where Lift from the same 36% gains 49.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| [`paper/`](paper) | `main.tex`, `refs.bib`, `figs/` |
+| [`figures/`](figures) | the figures the pipeline writes (`6_figures.sh`, `interp_grid.py --table depth`) |
 | [`pipeline/`](pipeline) | reproduction, one stage per step: fetch, train, then one script per table / figure |
 | [`scripts/`](scripts) | the experiments; each runs as `python scripts/<name>.py --help` |
 | [`ros2_ws/src/`](ros2_ws/src) | the testbed modules the experiments run on, unchanged from edge-vla-hil: policy backends, env factory, chunk executors (no ROS nodes; pure Python) |
@@ -145,12 +147,6 @@ How close a rerun gets:
   their confidence intervals, not the same counts.
 - **Full or LoRA fine-tuning, and training from scratch, are not deterministic** (GPU training
   kernels): same expectation.
-
-Paper:
-
-```bash
-cd paper && docker run --rm -u $(id -u):$(id -g) -v $PWD:/p -w /p texlive/texlive:latest-medium latexmk -pdf main.tex
-```
 
 ## License
 

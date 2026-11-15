@@ -1,7 +1,8 @@
 # CLAUDE.md
 
-The paper "Head or Representation?" and only the code its experiments use, moved out of
-edge-vla-hil. `pipeline/` reproduces it from scratch. See `README.md` for layout and run commands. The running log and next steps
+Reproduction code for the paper "Head or Representation?": only the code its experiments use,
+moved out of edge-vla-hil. `pipeline/` reproduces the results from scratch. The paper source
+is not in this repo (`paper/` is gitignored and stays local). See `README.md` for layout and run commands. The running log and next steps
 are in `docs/interp-plan.md` (local only, excluded from git).
 
 ## Build & test

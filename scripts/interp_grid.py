@@ -5,7 +5,7 @@
   --table perturb    Table 2: base -> head retrained per policy, task and perturbation, with
                      Wilson 95% intervals and the decision rule's verdict; writes grid.json
   --table severity   Table 3: Square under weaker perturbations, dev sweep and test cells
-  --table depth      Figure 3: paper/figs/fig_depth.pdf
+  --table depth      Figure 3: figures/fig_depth.pdf
 
     python3 scripts/interp_grid.py --table all
 """
@@ -206,7 +206,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument('--table', default='all', choices=('all', 'position', 'perturb', 'severity', 'depth'))
     p.add_argument('--json', default=O + 'grid.json')
-    p.add_argument('--figs', default='paper/figs')
+    p.add_argument('--figs', default='figures')
     args = p.parse_args()
     if args.table in ('all', 'position'):
         position()
