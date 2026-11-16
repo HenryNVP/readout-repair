@@ -2,7 +2,7 @@
 
 Reproduction code for the paper "Head or Representation?": only the code its experiments use,
 moved out of edge-vla-hil. `pipeline/` reproduces the results from scratch. The paper source
-is not in this repo (`paper/` is gitignored and stays local). See `README.md` for layout and run commands. The running log and next steps
+is not in this repo: it lives on edge-vla-hil branch `policy-interp` (~/edge-vla-hil-interp/paper). See `README.md` for layout and run commands. The running log and next steps
 are in `docs/interp-plan.md` (local only, excluded from git).
 
 ## Build & test
