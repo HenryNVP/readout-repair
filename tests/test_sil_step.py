@@ -10,7 +10,7 @@ import pytest
 
 from evh_controller.chunk_executor import make_executor
 from evh_plant.env_factory import hold_action
-from sil_step import StepWorker, fixed_delay, run_episode, sampled_delay
+from sil_step import StepWorker, fixed_delay, run_episode
 
 H = 6
 
@@ -98,17 +98,6 @@ def test_a_zero_tick_delay_is_refused():
         fixed_delay(0)
 
 
-def test_sampled_delays_leave_the_scene_rng_alone():
-    """Scene k depends on numpy's global RNG; drawing a delay must not shift it."""
-    np.random.seed(0)
-    expected = np.random.rand()
-    np.random.seed(0)
-    draw = sampled_delay([2, 5, 9], seed=1)
-    for _ in range(10):
-        assert draw() in (2, 5, 9)
-    assert np.random.rand() == expected
-
-
 # ------------------------------------------------------------------ episode
 def test_synchronous_waits_d_ticks_then_plays_the_whole_chunk():
     ep, env, _ = _run('synchronous', d=4, goal=1e9, deadline=30)
@@ -167,55 +156,6 @@ def test_in_delta_mode_an_idle_tick_holds_instead_of_repeating_the_last_delta():
 
 
 # ------------------------------------------------------------------ WiFi trace replay
-def _trace(lost_image=(), lost_chunk=(), offset=5.0):
-    """Robot sends an image every 50 ms (20 ms uplink); the server sends a chunk every 200 ms
-    (10 ms downlink); the server clock runs `offset` s ahead; probes see a symmetric 5 ms each way."""
-    robot, server = [], []
-    for k in range(200):
-        s = 100.0 + 0.05 * k
-        robot.append(dict(stream='sent:image', seq=k, sent=s, recv='', t1='', t2='', t3='', t4=''))
-        if k not in lost_image:
-            server.append(dict(stream='image', seq=k, sent=s, recv=s + 0.020 + offset))
-    for k in range(50):
-        c = 100.0 + 0.2 * k
-        server.append(dict(stream='sent:chunk', seq=k, sent=c + offset, recv=''))
-        if k not in lost_chunk:
-            robot.append(dict(stream='chunk', seq=k, sent=c + offset, recv=c + 0.010,
-                              t1='', t2='', t3='', t4=''))
-    for k in range(20):
-        t1 = 100.0 + k
-        robot.append(dict(stream='probe', seq='', sent='', recv='', t1=t1, t2=t1 + 0.005 + offset,
-                          t3=t1 + 0.006 + offset, t4=t1 + 0.011))
-    return robot, server
-
-
-def test_a_round_trip_is_uplink_plus_inference_plus_the_downlink_delay_of_that_moment():
-    from sil_step import wifi_rtt_ms
-    robot, server = _trace()
-    _t, rtt = wifi_rtt_ms(robot, server, inference_ms=80.0, trim_s=0.5)
-    # 20 ms up + 80 ms inference + 10 ms down; the 5 Hz send schedule is not charged
-    assert np.allclose(rtt, 110.0, atol=1.0)
-
-
-def test_a_lost_message_costs_the_wait_for_the_next_one_that_arrived():
-    from sil_step import wifi_rtt_ms
-    robot, server = _trace(lost_image={40})
-    t, rtt = wifi_rtt_ms(robot, server, inference_ms=80.0, trim_s=0.5)
-    i = int(np.argmin(np.abs(t - (0.05 * 40 - 0.5))))
-    assert rtt[i] == pytest.approx(160.0, abs=1.0)      # waits one image period (50 ms) more
-
-
-def test_trace_delay_is_paired_by_episode_and_scales_only_the_network():
-    from sil_step import TraceDelay
-    times = np.arange(0, 600, 0.05)
-    rtt = np.full_like(times, 280.0)                    # 80 ms inference + 200 ms network
-    a = TraceDelay(times, rtt, seed=3).for_episode(7)
-    b = TraceDelay(times, rtt, seed=3).for_episode(7)
-    assert a.offset_s == b.offset_s                    # same channel for every strategy
-    assert a(0) == 6                                   # 280 ms -> 6 ticks of 50 ms
-    assert TraceDelay(times, rtt, scale=2.0)(0) == 10  # 80 + 2 * 200 = 480 ms -> 10 ticks
-
-
 def test_make_strategy_passes_the_coverage_aware_knobs_and_leaves_others_alone():
     from sil_step import make_strategy
     policy = FakePolicy()

@@ -101,7 +101,7 @@ execution) and modules, exactly as for the paper; only scripts the paper does no
 | probes | `interp_act_sites.py` (decodability and gain per ACT site, swap test), `interp_gainmap.py`, `interp_repairable.py` (probe R²), `stats.py` |
 | data | `robomimic_to_lerobot.py`, `interp_augment.py` (shifted demo replays), `interp_regen.py` (ToolHang images), `interp_demos_npz.py`, `stamp_act_checkpoint.py` |
 | tables and figures | `interp_grid.py` (Tables 1–3, Figure 3), `interp_nuisance.py` (Figure 2) |
-| environment | `setup_env.sh`; `run_manifest.py`, `wifi_trace.py` (used by the harness) |
+| environment | `setup_env.sh` |
 
 ## Setup
 
