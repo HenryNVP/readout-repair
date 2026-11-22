@@ -1,36 +1,32 @@
 #!/usr/bin/env python3
-"""Interp fix: Lift demos replayed with the cube translated along ONE axis, for a coverage test.
+"""Lift demos replayed with the cube translated along ONE axis: the coverage retrains' data.
 
 Each robomimic Lift demo is replayed in the pinned sim (robosuite 1.4.1, the env the policies
 are evaluated in): robot joints and cube pose set from the demo's first frame, the cube moved
-by d = (dx, 0) or (0, dy), then the demo's absolute EE targets (robomimic_to_lerobot's
-abs-derived conversion) executed open loop with their xy shifted by ramp(t) * d (ramp 0 -> 1
+by d = (dx, 0) or (0, dy), then the demo's absolute EE targets (data.derive_absolute) executed open loop with their xy shifted by ramp(t) * d (ramp 0 -> 1
 over the first --ramp steps, since the arm starts from the same home pose). Images are rendered
 fresh. Kept only if the replay lifts the cube. Copy 0 of each demo is d = 0 (the re-rendered
 original), then --copies shifted ones, |d| uniform in [--min-shift, --max-shift] with a random
 sign. --axis x and --axis y use the same draws, so the two datasets differ only in direction.
 
 Writes a robomimic-layout HDF5 (actions_abs, dones, obs/{images (dataset orientation), eef
-pose, gripper}), which robomimic_to_lerobot --actions abs turns into the ACT training set.
+pose, gripper}), which to_lerobot.py --actions abs turns into the ACT training set.
 
-    python3 scripts/interp_augment.py --axis x --out outputs/interp/aug/lift_x.hdf5
+    python scripts/augment_lift.py --axis x --out outputs/interp/aug/lift_x.hdf5
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from interp_gainmap import TASKS, make_env  # noqa: E402
-from robomimic_to_lerobot import STATE_KEYS, derive_absolute, osc_scales, sorted_demos  # noqa: E402
+from readout_repair import REPO
+from readout_repair.data import CAMS, STATE_KEYS, derive_absolute, osc_scales, sorted_demos
+from readout_repair.sim import TASKS, make_env
 
-SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'robomimic', 'lift', 'ph',
-                   'image.hdf5')
-CAMS = ('agentview_image', 'robot0_eye_in_hand_image')
+SRC = os.path.join(REPO, 'data', 'robomimic', 'lift', 'ph', 'image.hdf5')
 
 
 def shifted_targets(abs7: np.ndarray, d: np.ndarray, ramp: int) -> np.ndarray:

@@ -7,7 +7,7 @@
   --table severity   Table 3: Square under weaker perturbations, dev sweep and test cells
   --table depth      Figure 3: figures/fig_depth.pdf
 
-    python3 scripts/interp_grid.py --table all
+    python scripts/tables.py --table all
 """
 from __future__ import annotations
 
@@ -15,12 +15,10 @@ import argparse
 import glob
 import json
 import os
-import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from stats import wilson  # noqa: E402
+from readout_repair.stats import wilson
 
 O = 'outputs/interp/'
 N = O + 'nuis/'

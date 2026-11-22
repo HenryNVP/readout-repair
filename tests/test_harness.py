@@ -10,7 +10,7 @@ import pytest
 
 from evh_controller.chunk_executor import make_executor
 from evh_plant.env_factory import hold_action
-from sil_step import StepWorker, fixed_delay, run_episode
+from readout_repair.harness import StepWorker, fixed_delay, run_episode
 
 H = 6
 
@@ -157,7 +157,7 @@ def test_in_delta_mode_an_idle_tick_holds_instead_of_repeating_the_last_delta():
 
 # ------------------------------------------------------------------ WiFi trace replay
 def test_make_strategy_passes_the_coverage_aware_knobs_and_leaves_others_alone():
-    from sil_step import make_strategy
+    from readout_repair.harness import make_strategy
     policy = FakePolicy()
     worker = StepWorker(policy, fixed_delay(2))
     ex = make_strategy('coverage_aware', worker, policy, s_wait=3, s_min=5)
@@ -168,7 +168,7 @@ def test_make_strategy_passes_the_coverage_aware_knobs_and_leaves_others_alone()
 
 
 def test_make_strategy_builds_the_inpainting_continuation():
-    from sil_step import make_strategy
+    from readout_repair.harness import make_strategy
     policy = FakePolicy()
     ex = make_strategy('continuation_inpaint', StepWorker(policy, fixed_delay(2)), policy)
     assert ex.name == 'continuation' and ex.inpaint and ex.roll_fn is None

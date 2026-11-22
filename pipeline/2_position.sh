@@ -12,7 +12,7 @@ evals() {   # name backend weights [episodes at an offset]: the arm on every off
 
 # probe and interchange: decodability of the cube offset at each ACT site and the action's gain
 # (S_probe, S_act), and the swap test (out-of-range feature directions vs the head)
-[ -f $O/sites_lift_act_base.npz ] || python scripts/interp_act_sites.py --weights $ACT_LIFT \
+[ -f $O/sites_lift_act_base.npz ] || python scripts/probe_sites.py --weights $ACT_LIFT \
   --out $O/sites_lift_act_base.npz > $O/sites_lift_act_base.log 2>&1
 
 evals act_base act $ACT_LIFT
@@ -52,11 +52,11 @@ vla_axis() {   # axis teacher shifts
   for s in 0,0 $3; do
     col $O/vla/${1}t_$s lift smolvla $VLA 1 10 --shift=$s --teacher $2 --label-every 2 --save-images
   done
-  [ -f $O/vla/rep_${1}pos/edit.json ] || python scripts/interp_vla_repair.py --parent $VLA \
+  [ -f $O/vla/rep_${1}pos/edit.json ] || python scripts/repair_vla.py --parent $VLA \
     --out $O/vla/rep_${1}pos --data "$O/vla/${1}t_*" --steps 3000 > $O/vla/rep_${1}pos.log 2>&1
   evals vla_rep_${1}pos smolvla $O/vla/rep_${1}pos 30
 }
 vla_axis x $ACT_LIFT_X '-0.07,0 -0.05,0 -0.03,0 0.03,0 0.05,0 0.07,0'
 vla_axis y $ACT_LIFT_Y '0,-0.07 0,-0.05 0,-0.03 0,0.03 0,0.05 0,0.07'
 
-python scripts/interp_grid.py --table position
+python scripts/tables.py --table position

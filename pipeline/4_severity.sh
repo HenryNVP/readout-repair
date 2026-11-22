@@ -14,7 +14,7 @@ done
 for t in faint03 faint05; do act_protocol square $ACT_SQ sq_ 30 40 100 $t; done
 for t in faint03 wroll90; do dp_protocol square $DP_SQ dpsq_ $t; done
 probe_out=$O/repairable_dpsq_mild_abs.txt
-[ -f $probe_out ] || python scripts/interp_repairable.py --base "$N/dpsq_cf1_none" \
+[ -f $probe_out ] || python scripts/probe_r2.py --base "$N/dpsq_cf1_none" \
   --shift "wroll90=$N/dpsq_cf1_wroll90" --shift "faint03=$N/dpsq_cf1_faint03" --absolute > $probe_out
 
-python scripts/interp_grid.py --table severity
+python scripts/tables.py --table severity

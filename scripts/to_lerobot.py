@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
 """Convert a robomimic image dataset (HDF5) into a LeRobotDataset, for ACT training.
 
-Neither side ships this conversion: LeRobot 0.3.3 has only dataset-version migrations
-(`datasets/v2`, `datasets/v21`), and robomimic 0.5 has no LeRobot export. So it lives here.
-
-The emitted schema deliberately mirrors the community ports `ankile/robomimic-ph-*-image`
-(key names, dim order, `next.done`, fps), which lets `--verify-against` diff our output
-against one of those datasets frame-for-frame. It is also, and more importantly, exactly the
-controller's observation contract:
+LeRobot 0.3.3 and robomimic 0.5 ship no such conversion. The schema is the policy backend's
+observation contract:
 
     observation.state              float32 [9]  = eef_pos(3) + eef_quat(4, xyzw) + gripper_qpos(2)
     observation.images.<camera>    uint8 [H,W,3], scene camera FIRST, wrist LAST
@@ -15,70 +10,34 @@ controller's observation contract:
                                    float32 [10] abs    [pos, rot_6d, gripper]
     alt.action                     float32 [7]  = the other action convention, when available
 
-Three things here are load-bearing and easy to get wrong:
+Load-bearing and easy to get wrong: the camera order (ACTBackend maps image_keys[0] <- agentview
+and [1] <- wrist positionally); the state layout (a mismatch is padded or truncated, not refused);
+and `alt.action`'s prefix (any key starting with `action` becomes a policy output).
 
-* **Camera order.** `ACTBackend._obs_to_batch` maps `image_keys[0]` <- agentview and
-  `image_keys[1]` <- wrist *positionally*, so the wrist camera is forced last regardless of
-  HDF5 ordering. Getting this backwards trains fine and behaves badly in the loop.
-* **State layout.** The 9-dim vector must match `obs['proprio']` element for element; the
-  backend silently pads/truncates a mismatch rather than raising.
-* **`alt.action`'s prefix.** `dataset_to_policy_features` types *any* key starting with
-  `action` as a policy output, so the alternate convention cannot be called `action.abs`
-  without ACT trying to predict it too. Anything not prefixed `observation`/`action` is
-  skipped, hence `alt.`: carried for provenance and mode switching, invisible to training.
+Absolute actions, `--actions`:
+  abs          read an `actions_abs` key (augment_lift.py writes one)
+  abs-derived  compute the targets from the recorded EE pose (data.derive_absolute): exact under
+               robosuite's delta OSC, and needs no simulator (robomimic's replay-based converter
+               cannot load these robosuite-1.2 demos in the pinned 1.4.1)
 
-Absolute actions (invariant 1 — plant, reactive layer and policy must agree on the mode) come
-in two flavours, `--actions`:
+Absolute rotation is written as rot_6d (a 10-dim action, the DP abs checkpoints' layout). On these
+demos 100% of the absolute orientation targets sit within 0.12 rad of the pi wrap and 48% of
+frames flip sign in axis-angle; an ACT trained on axis-angle targets scored 0/3 on Lift.
 
-  abs          read an `actions_abs` key, as written by robomimic's replay-based converter
-               (scripts/conversion/robosuite_add_absolute_actions.py). That converter cannot run
-               on the datasets we have: they were collected under robosuite 1.2, whose model XMLs
-               no longer load in the pinned 1.4.1 ("No geom with name robot0_g0_vis"), and
-               robomimic 0.5 now distributes only v1.5 raw states. Kept for datasets that do
-               carry the key.
-  abs-derived  compute the targets from the recorded EE pose instead of replaying, which needs no
-               simulator at all. Exact under `control_delta=True`: robosuite's OSC sets its goal
-               from the *current* pose every control step, so the target is
-               `p + output_max[:3] * a[:3]` and `R(output_max[3:] * a[3:6]) @ R_current`. The
-               scales come from the dataset's own controller config, and the quaternion algebra is
-               `evh_reactive.transforms` — the same code the reactive layer tracks with, so the
-               dataset cannot drift from the runtime convention.
-
-Absolute rotation is written as **rot_6d**, making the action 10-dim `[pos, rot_6d, gripper]` —
-the same layout as the DP abs-action checkpoints, and what `ACTBackend` recognises and converts
-back to the 7-dim contract. This is not a stylistic choice. Measured on these Lift demos, 100%
-of the absolute orientation targets sit within 0.12 rad of the pi wrap (the gripper points down
-for the whole task), 48% of frames flip sign, and consecutive frames jump by up to 2 pi with no
-motion behind them. A policy regressing that axis-angle target is being asked to average two
-antipodal encodings of the same rotation; the first ACT trained this way reached 0/3 on Lift with
-0.45 rad of rotation error under teacher forcing. `--rot-repr axis_angle` keeps the old 7-dim
-output for comparison. Delta actions are unaffected — their rotations are small and continuous.
-
-Usage (needs h5py + lerobot; `.venv-local` has both, as does the host image):
-
-    .venv-local/bin/python scripts/robomimic_to_lerobot.py \
-        --dataset data/robomimic/lift/ph/image.hdf5 --out data/lerobot/lift_ph
-    # absolute-action variant, then cross-check the delta one against a community port
-    ... --actions abs-derived --out data/lerobot/lift_ph_abs
-    ... --verify-against data/lerobot/ankile-ph-lift-image
+    python scripts/to_lerobot.py --dataset data/robomimic/square/ph/image.hdf5 \
+        --out outputs/interp/square/lerobot/square_ph_abs6 --actions abs-derived
 """
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import sys
 from pathlib import Path
 
 import numpy as np
 
-_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(_REPO, 'ros2_ws', 'src', 'evh_reactive'))
-sys.path.insert(0, os.path.join(_REPO, 'ros2_ws', 'src', 'evh_controller'))
-
-from evh_controller.rotation import abs7_to_abs10  # noqa: E402
-from evh_reactive.transforms import axisangle_to_quat, quat_mul, quat_to_axisangle  # noqa: E402
+from readout_repair.data import STATE_KEYS, abs7_to_abs10, derive_absolute, osc_scales, sorted_demos
 
 # Human-readable instruction per robosuite env. ACT is not language-conditioned, so this only
 # labels the episodes -- but a dataset that says "Lift" and nothing else is hard to read later.
@@ -90,25 +49,8 @@ TASK_INSTRUCTIONS = {
     'TwoArmTransport': 'transport the payload between the arms',
 }
 
-STATE_KEYS = ('robot0_eef_pos', 'robot0_eef_quat', 'robot0_gripper_qpos')
-
-# robosuite's OSC does not control the frame `robot0_eef_quat` reports: its tool frame is that
-# one rotated -90 deg about z (measured exactly, and constant — `R_ctrl = R_obs @ Rz(-pi/2)`,
-# positions identical). Absolute ORIENTATION targets are consumed by the controller, so they must
-# be expressed in ITS frame; deltas are immune because the controller composes them with its own
-# current orientation. Skipping this is silent: the arm is commanded a 90-degree twist it fights
-# for the whole episode, and an ACT trained on such targets scored 0/10 on Lift while the same
-# demos in delta form scored 7/10. The DP abs checkpoints agree with the corrected convention —
-# their targets come from replaying and reading the controller's own goal.
-EEF_TO_CONTROL_QUAT = np.array([0.0, 0.0, -np.sin(np.pi / 4), np.cos(np.pi / 4)])
-
 # Written into the dataset's meta/ so the action convention is recoverable after conversion.
 ACTION_MODE_FILE = 'evh_action_mode.json'
-
-
-def sorted_demos(data: dict) -> list[str]:
-    """Demo keys in numeric order — h5py yields them alphabetically (demo_10 before demo_2)."""
-    return sorted(data.keys(), key=lambda name: int(name.split('_')[1]))
 
 
 def camera_keys(obs: dict, wrist_hint: str = 'eye_in_hand') -> list[str]:
@@ -120,40 +62,6 @@ def camera_keys(obs: dict, wrist_hint: str = 'eye_in_hand') -> list[str]:
 def state_names(keys: tuple[str, ...], dims: list[int]) -> list[str]:
     """Per-element names, e.g. robot0_eef_pos_0 — same convention as the community ports."""
     return [f'{key}_{i}' for key, dim in zip(keys, dims) for i in range(dim)]
-
-
-def osc_scales(env_meta: dict) -> tuple[np.ndarray, np.ndarray]:
-    """OSC output_max, i.e. how far a unit action moves the goal — invariant 3's numbers."""
-    cfg = env_meta['env_kwargs'].get('controller_configs') or {}
-    output_max = cfg.get('output_max')
-    if output_max is None:                      # robosuite 1.5 nests it per body part
-        for part in cfg.get('body_parts', {}).values():
-            if isinstance(part, dict) and str(part.get('type', '')).startswith('OSC'):
-                output_max = part.get('output_max')
-    if output_max is None:
-        raise SystemExit('dataset controller config has no output_max — cannot derive absolute '
-                         'actions; pass --actions delta, or use a dataset with actions_abs')
-    output_max = np.asarray(output_max, dtype=np.float64)
-    return output_max[:3], output_max[3:6]
-
-
-def derive_absolute(actions: np.ndarray, eef_pos: np.ndarray, eef_quat: np.ndarray,
-                    pos_scale: np.ndarray, rot_scale: np.ndarray) -> np.ndarray:
-    """Delta OSC actions -> absolute EE targets, using the pose each action was issued from.
-
-    Orientation is composed in the controller's tool frame (see EEF_TO_CONTROL_QUAT), which is
-    what an absolute action is read in; position needs no correction (the two frames share an
-    origin).
-    """
-    clipped = np.clip(actions[:, :6], -1.0, 1.0)   # OSC clips to input_min/input_max first
-    out = np.empty_like(actions)
-    out[:, :3] = eef_pos + clipped[:, :3] * pos_scale
-    for t in range(len(actions)):
-        current = quat_mul(eef_quat[t], EEF_TO_CONTROL_QUAT)   # into the controller's tool frame
-        goal = quat_mul(axisangle_to_quat(clipped[t, 3:6] * rot_scale), current)
-        out[t, 3:6] = quat_to_axisangle(goal)
-    out[:, 6:] = actions[:, 6:]                    # gripper passes through
-    return out
 
 
 def action_names(action_dim: int) -> list[str]:
@@ -295,7 +203,7 @@ def convert(args: argparse.Namespace) -> Path:
                 print(f'  {i + 1}/{len(demos)} episodes')
 
     # The action convention travels with the dataset, so the checkpoint trained on it can be
-    # stamped from here rather than by hand (scripts/stamp_act_checkpoint.py -> invariant 1).
+    # stamped from here rather than by hand (scripts/stamp_act_checkpoint.py).
     mode_path = out / 'meta' / ACTION_MODE_FILE
     mode_path.write_text(json.dumps({'absolute_actions': args.actions != 'delta',
                                      'actions': args.actions,
@@ -303,11 +211,6 @@ def convert(args: argparse.Namespace) -> Path:
     print(f'wrote {dataset.meta.total_episodes} episodes / {dataset.meta.total_frames} frames '
           f'-> {out}')
     return out
-
-
-def _psnr(a: np.ndarray, b: np.ndarray) -> float:
-    mse = float(((a.astype(np.float32) - b.astype(np.float32)) ** 2).mean())
-    return float('inf') if mse == 0 else 10 * np.log10(255.0 ** 2 / mse)
 
 
 def _frame_image(sample: dict, key: str) -> np.ndarray:
@@ -352,41 +255,6 @@ def self_check(root: Path, args: argparse.Namespace) -> bool:
     return ok
 
 
-def verify_against(root: Path, ref_root: str, episodes: int) -> bool:
-    """Cross-check against another LeRobotDataset of the same source (e.g. a community port).
-
-    Numbers must agree; images need not — a video-encoded reference is lossy, so its PSNR is
-    reported rather than asserted.
-    """
-    from lerobot.datasets.lerobot_dataset import LeRobotDataset
-
-    ours = LeRobotDataset(repo_id=f'local/{root.name}', root=root, video_backend='pyav')
-    ref = LeRobotDataset(repo_id=f'local/{Path(ref_root).name}', root=ref_root,
-                         video_backend='pyav')
-    print(f'cross-check vs {ref_root}: {ref.meta.total_episodes} episodes / '
-          f'{ref.meta.total_frames} frames, fps {ref.fps}')
-    if (ours.meta.total_frames, ours.fps) != (ref.meta.total_frames, ref.fps):
-        print('  WARNING: frame count or fps differs — episode indices may not correspond')
-
-    shared_images = sorted({k for k in ours.meta.features if k.startswith('observation.images')}
-                           & set(ref.meta.features))
-    ok = True
-    for ep in sorted({0, ref.meta.total_episodes // 2, ref.meta.total_episodes - 1})[:episodes]:
-        i_ours, i_ref = int(ours.episode_data_index['from'][ep]), int(ref.episode_data_index['from'][ep])
-        n_ours = int(ours.episode_data_index['to'][ep]) - i_ours
-        n_ref = int(ref.episode_data_index['to'][ep]) - i_ref
-        a, b = ours[i_ours], ref[i_ref]
-        a_err = float(np.abs(a['action'].numpy() - b['action'].numpy()).max())
-        s_err = float(np.abs(a['observation.state'].numpy() - b['observation.state'].numpy()).max())
-        psnrs = ' '.join(f'{k.split(".")[-1]}={_psnr(_frame_image(a, k), _frame_image(b, k)):.1f}dB'
-                         for k in shared_images)
-        good = n_ours == n_ref and a_err < 1e-5 and s_err < 1e-5
-        ok &= good
-        print(f'  episode {ep}: len {n_ours}=={n_ref} action {a_err:.1e} state {s_err:.1e} | '
-              f'{psnrs}  {"ok" if good else "MISMATCH"}')
-    return ok
-
-
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     p.add_argument('--dataset', required=True, help='robomimic image.hdf5')
@@ -396,8 +264,7 @@ def main() -> None:
                    help="abs reads an 'actions_abs' key; abs-derived computes the targets from "
                         'the recorded EE pose (no simulator needed) — see the module docstring')
     p.add_argument('--rot-repr', choices=('rot_6d', 'axis_angle'), default='rot_6d',
-                   help='absolute rotation encoding; rot_6d makes the action 10-dim and is the '
-                        'only continuous one where these targets live (see the docstring)')
+                   help='absolute rotation encoding; rot_6d makes the action 10-dim (see the docstring)')
     p.add_argument('--images', choices=('image', 'video'), default='image',
                    help='image = lossless PNG; video is ~40x smaller but visibly lossy at 84x84')
     p.add_argument('--filter-key', default='', help="dataset mask to use, e.g. train / valid")
@@ -407,20 +274,14 @@ def main() -> None:
     p.add_argument('--overwrite', action='store_true')
     p.add_argument('--check-episodes', type=int, default=3,
                    help='episodes sampled for the post-conversion self-check (0 to skip)')
-    p.add_argument('--verify-against', default='',
-                   help='root of another LeRobotDataset of the same demos to diff against')
-    p.add_argument('--verify-only', action='store_true',
-                   help='skip conversion; only run the checks against an existing --out')
     args = p.parse_args()
 
-    out = Path(args.out) if args.verify_only else convert(args)
+    out = convert(args)
 
     ok = True
     if args.check_episodes:
         print('self-check against the source HDF5:')
         ok &= self_check(out, args)
-    if args.verify_against:
-        ok &= verify_against(out, args.verify_against, args.check_episodes or 3)
     if not ok:
         sys.exit('verification FAILED')
 

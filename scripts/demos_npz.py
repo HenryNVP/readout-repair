@@ -1,31 +1,22 @@
 #!/usr/bin/env python3
-"""Write robomimic image demos in the recorded-rollout layout interp_edit --images reads
+"""Write robomimic image demos in the recorded-rollout layout repair_act.py --images reads
 (img_agent, img_wrist, proprio, teacher = the next 16 absolute actions, abs10), so a repair can mix
 the original demonstrations in, as standard fine-tuning does, and keep in-range behaviour.
 
-Actions are converted exactly as robomimic_to_lerobot --actions abs-derived does; chunks past the
+Actions are converted exactly as to_lerobot.py --actions abs-derived does; chunks past the
 episode end repeat the last action.
 
-    python3 scripts/interp_demos_npz.py --dataset .../square/ph/image.hdf5 --out outputs/interp/nuis/sq_demos
+    python scripts/demos_npz.py --dataset .../square/ph/image.hdf5 --out outputs/interp/nuis/sq_demos
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import sil_step  # noqa: E402,F401  (puts the ROS-free packages on sys.path)
-from robomimic_to_lerobot import STATE_KEYS, derive_absolute, osc_scales, sorted_demos  # noqa: E402
-
-
-def chunks(actions: np.ndarray, H: int) -> np.ndarray:
-    """(T, D) -> (T, H, D): actions t..t+H-1, the last one repeated past the end."""
-    T = len(actions)
-    return actions[np.minimum(np.arange(T)[:, None] + np.arange(H)[None], T - 1)]
+from readout_repair.data import STATE_KEYS, chunks, derive_absolute, osc_scales, sorted_demos
 
 
 def main() -> None:
@@ -36,6 +27,7 @@ def main() -> None:
     p.add_argument('--chunk', type=int, default=16)
     args = p.parse_args()
     import h5py
+
     from evh_controller.rotation import abs7_to_abs10
     os.makedirs(args.out, exist_ok=True)
     with h5py.File(args.dataset, 'r') as f:

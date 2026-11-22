@@ -1,5 +1,18 @@
-# Tool configuration only: this repo is not a package and is never pip-installed. Dependencies
-# are in requirements.txt; scripts and tests put ros2_ws/src/<pkg> and scripts/ on sys.path.
+# readout_repair/ is the library behind scripts/, installed editable by scripts/setup_env.sh
+# (pip install -e . --no-deps; dependencies are pinned in requirements.txt). Importing it puts the
+# testbed modules in ros2_ws/src on sys.path.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "readout-repair"
+version = "0.1.0"
+description = "Head or representation? Last-layer retraining for distribution-shift failures of visuomotor policies"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["readout_repair"]
 
 # The single pytest config: there is no pytest.ini (it would silently take precedence over
 # this block). Tests live in the top-level tests/ rather than per-package test/ dirs — a third of
@@ -8,6 +21,7 @@
 [tool.pytest.ini_options]
 minversion = "6.0"
 testpaths = ["tests"]
+pythonpath = [".", "scripts"]
 markers = [
     "ros2: test requires a sourced ROS2 environment (rclpy + message packages)",
     "integration: test spins real nodes over DDS (implies ros2); give it its own ROS_DOMAIN_ID",
@@ -45,10 +59,11 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = [
+    "readout_repair",
     "evh_plant",
     "evh_controller",
     "evh_reactive",
-    "robomimic_to_lerobot",   # scripts/ modules are ours too; tests import them by module name
+    "to_lerobot",             # scripts/ modules are ours too; tests import them by module name
     "stamp_act_checkpoint",
 ]
 
@@ -63,7 +78,7 @@ exclude = [
 ]
 
 [tool.coverage.run]
-source = ["ros2_ws/src"]
+source = ["readout_repair", "ros2_ws/src"]
 omit = [
     "*/tests/*",
     "*/external/*",

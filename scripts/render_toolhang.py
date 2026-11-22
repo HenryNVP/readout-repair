@@ -5,9 +5,9 @@ robomimic's dataset_states_to_obs reloads each demo's stored model XML, which ro
 cannot load (its robot geoms were renamed); the state vector is unchanged, so this builds the
 scene with the installed robosuite and sets the recorded state at every step instead. Writes the
 robomimic image layout (actions, dones, states, obs/{agentview_image, robot0_eye_in_hand_image,
-eef pose, gripper}) that robomimic_to_lerobot converts; images upright, as robomimic stores them.
+eef pose, gripper}) that to_lerobot.py converts; images upright, as robomimic stores them.
 
-    python3 scripts/interp_regen.py --dataset .../tool_hang/ph/demo.hdf5 --out .../tool_hang_84.hdf5
+    python scripts/render_toolhang.py --dataset .../tool_hang/ph/demo.hdf5 --out .../tool_hang_84.hdf5
 """
 from __future__ import annotations
 
@@ -18,11 +18,10 @@ import types
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from robomimic_to_lerobot import STATE_KEYS, sorted_demos  # noqa: E402
+from readout_repair import REPO
+from readout_repair.data import STATE_KEYS, sorted_demos
 
 CAMS = ('agentview', 'robot0_eye_in_hand')
-REPO = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 
 
 def main() -> None:

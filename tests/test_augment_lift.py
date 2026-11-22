@@ -1,10 +1,5 @@
-import os
-import sys
-
 import numpy as np
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
-from interp_augment import draws, shifted_targets  # noqa: E402
+from augment_lift import draws, shifted_targets
 
 
 def test_shifted_targets_ramp_and_axis():

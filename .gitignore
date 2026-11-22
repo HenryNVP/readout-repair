@@ -12,3 +12,4 @@ __pycache__/
 
 # the paper source stays local; this repo is the reproduction only
 paper/
+*.egg-info/

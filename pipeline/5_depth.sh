@@ -5,7 +5,7 @@
 # Iteration k: the iteration-(k-1) policy drives, the unedited policy labels the shift-free render.
 source "$(dirname "$0")/common.sh"
 S=${SPEC[bothcam]}
-fit() {   # name data [interp_edit args...]
+fit() {   # name data [repair_act.py args...]
   local n=$1 data=$2
   shift 2
   edit $E/$n $ACT_SQ --images "$data" --pres none --beta 0 --batch 32 "$@"
@@ -38,7 +38,7 @@ fit sq_depth_head_r4 "$R4" --site head --rank 10 --lr 1e-3 --steps 6000
 fit sq_depth_all8_r4 "$R4" --site all --rank 8 --lr 1e-3 --steps 6000
 
 # forgetting: the iteration-4 full fine-tune with 100 original demonstrations replayed
-[ -f $N/sq_demos/ep0099.npz ] || python scripts/interp_demos_npz.py --dataset data/robomimic/square/ph/image.hdf5 \
+[ -f $N/sq_demos/ep0099.npz ] || python scripts/demos_npz.py --dataset data/robomimic/square/ph/image.hdf5 \
   --out $N/sq_demos --max-demos 100 > $N/sq_demos.log 2>&1
 fit sq_depth_full_r4mix "$R4,$N/sq_demos" $FULL --steps 8000
 
@@ -54,4 +54,4 @@ thfit th_depth_full_r2 "$N/thimg_cf1_bothflip,$N/thimg_cf2_bothflip,$N/thimg_cf1
 col $N/th_depth_full_r2_eval3_bothflip toolhang act $E/th_depth_full_r2 3 30 --nuisance "$S"
 col $N/th_depth_full_r2_eval3_none toolhang act $E/th_depth_full_r2 3 30
 
-python scripts/interp_grid.py --table depth
+python scripts/tables.py --table depth

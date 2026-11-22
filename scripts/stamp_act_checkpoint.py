@@ -5,7 +5,7 @@ An ACT checkpoint is 7-dim whether it learned delta actions or absolute EE targe
 not recoverable from the weights, and guessing it wrong is the silent garbage-motion failure the
 plant's `/policy/absolute` cross-check exists to catch. So the mode is carried:
 
-    robomimic_to_lerobot.py  ->  <dataset>/meta/evh_action_mode.json
+    to_lerobot.py            ->  <dataset>/meta/evh_action_mode.json
     this script              ->  <checkpoint>/evh_policy.json
     ACTBackend               ->  reads it, announces it on /policy/absolute
     plant                    ->  aborts if it disagrees with its own `absolute` arg
@@ -24,13 +24,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_REPO / 'ros2_ws' / 'src' / 'evh_controller'))
-
-from evh_controller.policy import POLICY_SIDECAR  # noqa: E402
+import readout_repair  # noqa: F401  (puts the testbed packages on sys.path)
 
 ACTION_MODE_FILE = 'evh_action_mode.json'
 
@@ -81,9 +77,10 @@ def main() -> None:
         if absolute is None:
             raise SystemExit(
                 f'{root}/meta/{ACTION_MODE_FILE} is missing — the dataset predates the stamp '
-                '(re-run scripts/robomimic_to_lerobot.py) or pass --absolute')
+                '(re-run scripts/to_lerobot.py) or pass --absolute')
         source = str(root)
 
+    from evh_controller.policy import POLICY_SIDECAR
     out = ckpt / POLICY_SIDECAR
     out.write_text(json.dumps({'absolute_actions': absolute}, indent=2) + '\n')
     print(f'{out}: absolute_actions={absolute}  (from {source})')

@@ -19,23 +19,23 @@ act() {   # out dataset_root steps
 A=$O/aug; mkdir -p $A/train
 for arm in base x y; do
   if [ $arm = base ]; then extra="--axis x --copies 0"; else extra="--axis $arm"; fi
-  [ -f $A/lift_$arm.hdf5 ] || python scripts/interp_augment.py $extra --out $A/lift_$arm.hdf5 > $A/gen_$arm.log 2>&1
-  [ -d $A/lerobot/lift_$arm ] || python scripts/robomimic_to_lerobot.py --dataset $A/lift_$arm.hdf5 \
+  [ -f $A/lift_$arm.hdf5 ] || python scripts/augment_lift.py $extra --out $A/lift_$arm.hdf5 > $A/gen_$arm.log 2>&1
+  [ -d $A/lerobot/lift_$arm ] || python scripts/to_lerobot.py --dataset $A/lift_$arm.hdf5 \
     --out $A/lerobot/lift_$arm --actions abs --check-episodes 0 > $A/conv_$arm.log 2>&1
   act $A/train/act_lift_aug_$arm $A/lerobot/lift_$arm 100000
 done
 
 A=$O/square; mkdir -p $A/train
-[ -d $A/lerobot/square_ph_abs6 ] || python scripts/robomimic_to_lerobot.py \
+[ -d $A/lerobot/square_ph_abs6 ] || python scripts/to_lerobot.py \
   --dataset data/robomimic/square/ph/image.hdf5 --out $A/lerobot/square_ph_abs6 \
   --actions abs-derived --check-episodes 2 > $A/conv.log 2>&1
 act $A/train/act_square_abs6 $A/lerobot/square_ph_abs6 100000
 
 # ToolHang ships states only: render 84 px agentview + wrist images first
 A=$O/toolhang; mkdir -p $A/train
-[ -f $A/tool_hang_84.hdf5 ] || python scripts/interp_regen.py --dataset data/robomimic/tool_hang/ph/demo.hdf5 \
+[ -f $A/tool_hang_84.hdf5 ] || python scripts/render_toolhang.py --dataset data/robomimic/tool_hang/ph/demo.hdf5 \
   --out $A/tool_hang_84.hdf5 > $A/regen.log 2>&1
-[ -d $A/lerobot/toolhang_ph_abs6 ] || python scripts/robomimic_to_lerobot.py --dataset $A/tool_hang_84.hdf5 \
+[ -d $A/lerobot/toolhang_ph_abs6 ] || python scripts/to_lerobot.py --dataset $A/tool_hang_84.hdf5 \
   --out $A/lerobot/toolhang_ph_abs6 --actions abs-derived --check-episodes 2 > $A/conv.log 2>&1
 act $A/train/act_toolhang_abs6 $A/lerobot/toolhang_ph_abs6 100000
 

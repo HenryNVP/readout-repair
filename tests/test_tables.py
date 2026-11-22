@@ -1,9 +1,6 @@
-import os
-import sys
+from tables import verdict
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
-from interp_grid import verdict  # noqa: E402
-from stats import wilson  # noqa: E402
+from readout_repair.stats import wilson
 
 
 def cell(k, n):

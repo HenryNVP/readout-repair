@@ -7,17 +7,14 @@ the alternate action convention accidentally becoming a second policy output.
 import numpy as np
 import pytest
 
-from robomimic_to_lerobot import (
+from readout_repair.data import (
     EEF_TO_CONTROL_QUAT,
     STATE_KEYS,
-    action_names,
-    build_features,
-    camera_keys,
     derive_absolute,
     osc_scales,
     sorted_demos,
-    state_names,
 )
+from to_lerobot import action_names, build_features, camera_keys, state_names
 
 
 def test_demos_sort_numerically_not_alphabetically():

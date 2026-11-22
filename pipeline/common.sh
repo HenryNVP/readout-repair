@@ -17,7 +17,7 @@ VLA=$O/vla/smolvla_lift/checkpoints/last/pretrained_model
 DP_LIFT=checkpoints/dp_lift_ph_image_cnn.ckpt
 DP_SQ=checkpoints/dp_square_ph_image_cnn.ckpt
 
-# the paper's perturbations (scripts/interp_nuisance.py), each applied to both cameras
+# the paper's perturbations (scripts/fig_shifts.py), each applied to both cameras
 declare -A SPEC=(
   [bothcam]='cam=0,0,0,30;wroll=90'                          # turn + roll
   [darkredwroll]='table=0.75,0.2,0.15;light=0.3;wroll=90'    # red, dim + roll
@@ -28,21 +28,21 @@ declare -A SPEC=(
 )
 OFFSETS='-0.07,0 -0.05,0 0.05,0 0.07,0 0,-0.07 0,-0.05 0,0.05 0,0.07'   # Table 1, beyond the demos' ±3 cm
 
-# col OUT TASK BACKEND WEIGHTS SEED EPISODES [interp_collect args...]: one recorded rollout set
+# col OUT TASK BACKEND WEIGHTS SEED EPISODES [collect.py args...]: one recorded rollout set
 col() {
   local out=$1 task=$2 backend=$3 w=$4 seed=$5 n=$6
   shift 6
   [ -f $out.done ] && return
   local deadline=20; [ $task = toolhang ] && deadline=45
-  python scripts/interp_collect.py --task $task --backend $backend --weights $w --seed $seed \
+  python scripts/collect.py --task $task --backend $backend --weights $w --seed $seed \
     --episodes $n --deadline-s $deadline --out-dir $out "$@" > $out.log 2>&1 && touch $out.done
 }
 
-# head retrain of an ACT policy: edit OUT PARENT [interp_edit args...]
+# head retrain of an ACT policy: edit OUT PARENT [repair_act.py args...]
 edit() {
   local out=$1 parent=$2
   shift 2
-  [ -f $out/edit.json ] || python scripts/interp_edit.py --parent $parent --out $out "$@" > $out.log 2>&1
+  [ -f $out/edit.json ] || python scripts/repair_act.py --parent $parent --out $out "$@" > $out.log 2>&1
 }
 
 # The head-retrain protocol for one policy, task and perturbation: on-policy episodes on training
@@ -63,7 +63,7 @@ dp_protocol() {   # task ckpt prefix tag
   local task=$1 P=$2 X=$3 tag=$4 S=${SPEC[$4]}
   col $N/${X}cf1_none $task dp $P 1 30 --selflabel cf --label-every 4
   col $N/${X}cf1_$tag $task dp $P 1 40 --selflabel cf --label-every 4 --nuisance "$S"
-  [ -f $E/${X}rep_$tag.ckpt ] || python scripts/interp_dp_repair.py --parent $P --out $E/${X}rep_$tag.ckpt \
+  [ -f $E/${X}rep_$tag.ckpt ] || python scripts/repair_dp.py --parent $P --out $E/${X}rep_$tag.ckpt \
     --data "$N/${X}cf1_$tag,$N/${X}cf1_none" > $E/${X}rep_$tag.log 2>&1
   col $N/${X}eval3_base_$tag $task dp $P 3 100 --nuisance "$S"
   col $N/${X}eval3_rep_$tag $task dp $E/${X}rep_$tag.ckpt 3 100 --nuisance "$S"
@@ -73,7 +73,7 @@ vla_protocol() {   # tag
   local tag=$1 S=${SPEC[$1]}
   col $N/vla_cf1_none lift smolvla $VLA 1 20 --selflabel cf --label-every 4 --save-images
   col $N/vla_cf1_$tag lift smolvla $VLA 1 30 --selflabel cf --label-every 4 --save-images --nuisance "$S"
-  [ -f $E/vla_rep_$tag/edit.json ] || python scripts/interp_vla_repair.py --parent $VLA --out $E/vla_rep_$tag \
+  [ -f $E/vla_rep_$tag/edit.json ] || python scripts/repair_vla.py --parent $VLA --out $E/vla_rep_$tag \
     --data "$N/vla_cf1_$tag,$N/vla_cf1_none" > $E/vla_rep_$tag.log 2>&1
   col $N/vla_eval3_base_$tag lift smolvla $VLA 3 50 --nuisance "$S"
   col $N/vla_eval3_rep_$tag lift smolvla $E/vla_rep_$tag 3 50 --nuisance "$S"

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Step harness: the testbed's chunk executors on robosuite, delay in ticks, no ROS.
 
 Every rollout in the paper runs through `run_episode` with `make_strategy('synchronous', ...)` and
@@ -20,21 +19,14 @@ from __future__ import annotations
 
 import collections
 import dataclasses
-import os
-import sys
 import time
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 
-_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-for _pkg in ('evh_controller', 'evh_plant'):
-    _path = os.path.join(_REPO, 'ros2_ws', 'src', _pkg)
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
-
-from evh_controller.inference_worker import Arrival  # noqa: E402  (numpy only)
-from evh_plant.env_factory import hold_action  # noqa: E402  (numpy only)
+# the testbed modules (on sys.path once readout_repair/__init__ has run); numpy only
+from evh_controller.inference_worker import Arrival
+from evh_plant.env_factory import hold_action
 
 CONTROL_HZ = 20.0
 

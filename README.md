@@ -83,25 +83,37 @@ on Square, where Lift from the same 36% gains 49.
 
 | Path | What |
 |---|---|
-| [`figures/`](figures) | the figures the pipeline writes (`6_figures.sh`, `interp_grid.py --table depth`) |
-| [`pipeline/`](pipeline) | reproduction, one stage per step: fetch, train, then one script per table / figure |
-| [`scripts/`](scripts) | the experiments; each runs as `python scripts/<name>.py --help` |
+| [`readout_repair/`](readout_repair) | the library: step harness, sim and perturbations, ACT internals, labels, probes, statistics, head retraining for ACT / Diffusion Policy / SmolVLA |
+| [`scripts/`](scripts) | thin command-line entry points over it; each runs as `python scripts/<name>.py --help` |
+| [`pipeline/`](pipeline) | reproduction, one stage per step: fetch, train, then one stage per table / figure |
 | [`ros2_ws/src/`](ros2_ws/src) | the testbed modules the experiments run on, unchanged from edge-vla-hil: policy backends, env factory, chunk executors (no ROS nodes; pure Python) |
 | [`tests/`](tests) | one test file per module |
 
-The rollouts run through the testbed's own step harness (`scripts/sil_step.py`, synchronous chunk
-execution) and modules, exactly as for the paper; only scripts the paper does not use were removed.
+Generated figures go to `figures/` and results to `outputs/` (both local, not in git).
+
+`readout_repair/`, by module:
+
+| Module | What |
+|---|---|
+| `harness` | the testbed's step loop: chunk executors on robosuite, synchronous, 1-tick delay |
+| `sim` | tasks, envs, object placement, bitwise sim snapshots |
+| `nuisance` | the perturbations: render-only camera, light, colour and opacity changes |
+| `labels` | counterfactual labels (the shift-free render) and out-of-range pseudo-labels |
+| `act` | ACT internals: differentiable forward, site hooks, low-rank edits |
+| `probes` | operating points, gain and swap tests, the grasp-point probe |
+| `repair` | head retraining (closed form or SGD), LoRA, full fine-tuning; DP and SmolVLA readouts |
+| `data`, `stats` | recorded episodes and robomimic demos; Wilson intervals and ridge probes |
 
 `scripts/`, by role:
 
 | Role | Files |
 |---|---|
-| rollouts and labels | `interp_collect.py` (any policy, task, perturbation; records what the policy saw and counterfactual labels), `interp_nuisance.py` (the perturbations), `sil_step.py` (the step harness), `sim_utils.py` |
-| retraining | `interp_edit.py` (ACT: head, LoRA, full), `interp_dp_repair.py`, `interp_vla_repair.py` |
-| probes | `interp_act_sites.py` (decodability and gain per ACT site, swap test), `interp_gainmap.py`, `interp_repairable.py` (probe R²), `stats.py` |
-| data | `robomimic_to_lerobot.py`, `interp_augment.py` (shifted demo replays), `interp_regen.py` (ToolHang images), `interp_demos_npz.py`, `stamp_act_checkpoint.py` |
-| tables and figures | `interp_grid.py` (Tables 1–3, Figure 3), `interp_nuisance.py` (Figure 2) |
-| environment | `setup_env.sh` |
+| rollouts and labels | `collect.py` (any policy, task, perturbation; records what the policy saw and its labels) |
+| retraining | `repair_act.py` (head, LoRA, full), `repair_dp.py`, `repair_vla.py` |
+| probes | `probe_sites.py` (decodability and gain per ACT site, swap test), `probe_r2.py` (grasp-point R²) |
+| data | `to_lerobot.py`, `augment_lift.py` (shifted demo replays), `render_toolhang.py` (ToolHang images), `demos_npz.py`, `stamp_act_checkpoint.py` |
+| tables and figures | `tables.py` (Tables 1–3, Figure 3), `fig_shifts.py` (Figure 2) |
+| environment | `setup_env.sh` (venv, pins, `pip install -e .`) |
 
 ## Setup
 
@@ -141,7 +153,7 @@ How close a rerun gets:
   long failing ones: the original runs used Ubuntu's apt scipy, whose LAPACK (reached through
   robosuite's numba-compiled controller) differs from the pip wheel's in the last bits.
 - **Diffusion Policy and SmolVLA rollouts are deterministic too, from 2026-11-14 on**:
-  `interp_collect` seeds torch per scene and forces deterministic kernels, so a rerun of a cell is
+  `collect.py` seeds torch per scene and forces deterministic kernels, so a rerun of a cell is
   bit-identical (`REPLAY=1 python -m pytest tests/test_replay.py`). The recorded runs predate this
   (unseeded noise), so for these policies a rerun is a fresh sample: expect the paper's cells within
   their confidence intervals, not the same counts.

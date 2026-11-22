@@ -1,6 +1,6 @@
 import numpy as np
 
-from stats import group_cv, ridge_fit, wilson
+from readout_repair.stats import group_cv, ridge_fit, wilson
 
 
 def test_wilson_brackets_the_rate_and_stays_in_unit_interval():

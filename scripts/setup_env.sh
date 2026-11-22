@@ -38,6 +38,7 @@ for r in m.requires('lerobot'):
 PY
 # -c keeps lerobot's requirements from moving the pins above (torch, numpy, ...)
 $PIP -r $V/lerobot_reqs.txt -c requirements.txt
+$PIP --no-deps -e .                # readout_repair, the library the scripts import
 
 cat > $ENVF << EOF
 source $V/bin/activate
@@ -50,8 +51,7 @@ python -c "from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy"
 
 for gl in egl osmesa; do      # render one Lift frame through the same env the evals use
   if MUJOCO_GL=$gl PYOPENGL_PLATFORM=$gl python -c "
-import sys; sys.path.insert(0, 'scripts')
-from interp_gainmap import TASKS, make_env
+from readout_repair.sim import TASKS, make_env
 env, obs = make_env(TASKS['lift']); assert obs['agentview_image'].std() > 1; env.close()"; then
     echo "export MUJOCO_GL=$gl PYOPENGL_PLATFORM=$gl" >> $ENVF
     echo "setup ok: MUJOCO_GL=$gl; activate with: source $ENVF"

@@ -25,7 +25,7 @@ probe() {   # out prefix tags...
   local out=$1 X=$2 a=() t
   shift 2
   for t in "$@"; do a+=(--shift "$t=$N/${X}cf1_$t"); done
-  [ -f $out ] || python scripts/interp_repairable.py --base "$N/${X}cf1_none" "${a[@]}" --absolute > $out
+  [ -f $out ] || python scripts/probe_r2.py --base "$N/${X}cf1_none" "${a[@]}" --absolute > $out
 }
 probe $O/repairable_abs.txt '' bothcam darkredwroll bothflip bothzoom faint invisible
 probe $O/repairable_dp_abs.txt dp_ bothcam darkredwroll bothflip faint invisible
@@ -33,4 +33,4 @@ probe $O/repairable_sq_abs.txt sq_ bothcam darkredwroll bothflip bothzoom faint 
 probe $O/repairable_dpsq_abs.txt dpsq_ bothcam darkredwroll bothflip faint invisible
 probe $O/repairable_th_abs.txt th_ bothflip invisible
 
-python scripts/interp_grid.py --table perturb
+python scripts/tables.py --table perturb

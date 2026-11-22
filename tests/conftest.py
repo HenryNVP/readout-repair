@@ -1,28 +1,13 @@
 """Shared test setup.
 
-Makes the package sources importable without a colcon build (handy for the pure-Python logic
-tests), and provides an rclpy lifecycle fixture for the node-boot smoke tests. Anything needing
+Importing readout_repair makes the testbed modules importable without a colcon build; also an
+rclpy lifecycle fixture for the node-boot smoke tests. Anything needing
 rclpy / ROS2 message packages is skipped automatically when ROS2 is not sourced, so the suite
 stays green on a bare Python box and only exercises the full graph on the host/Jetson.
 """
-import os
-import sys
-
 import pytest
 
-_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_SRC = os.path.join(_REPO, 'ros2_ws', 'src')
-
-# Put each package root on sys.path: ros2_ws/src/<pkg> -> import <pkg>.<module>
-for _pkg in ('evh_plant', 'evh_controller', 'evh_reactive'):
-    _path = os.path.join(_SRC, _pkg)
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
-
-# scripts/ holds one-off tooling, not packages, but the logic in it is testable the same way.
-_SCRIPTS = os.path.join(_REPO, 'scripts')
-if _SCRIPTS not in sys.path:
-    sys.path.insert(0, _SCRIPTS)
+import readout_repair  # noqa: E402,F401  (puts ros2_ws/src/<pkg> on sys.path; pyproject adds . and scripts/)
 
 
 def _ros2_available() -> bool:

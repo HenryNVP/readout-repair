@@ -2,7 +2,7 @@
 checkpoints". Opt-in (GPU, a few minutes): REPLAY=1 python -m pytest tests/test_replay.py
 
 Each case runs the first episodes of a paper cell twice, with the pipeline's own arguments
-(pipeline/common.sh), and requires identical commands. DP and SmolVLA need interp_collect's per-scene
+(pipeline/common.sh), and requires identical commands. DP and SmolVLA need collect.py's per-scene
 torch seed and deterministic kernels for this; ACT draws no noise.
 
 Runs recorded before 2026-11-14 (Docker image, no per-scene seed) are a different sample of the
@@ -35,7 +35,7 @@ def test_a_rerun_is_bitwise_identical(name, tmp_path):
     if not os.path.exists(weights):
         pytest.skip(f'weights missing: {weights}')
     for run in ('a', 'b'):
-        subprocess.run([sys.executable, os.path.join(REPO, 'scripts/interp_collect.py'), '--task', task,
+        subprocess.run([sys.executable, os.path.join(REPO, 'scripts/collect.py'), '--task', task,
                         '--backend', backend, '--weights', weights, '--seed', str(seed),
                         '--episodes', str(EPISODES), '--deadline-s', '20', '--out-dir', str(tmp_path / run),
                         *extra], check=True, cwd=REPO, env={**os.environ, 'MUJOCO_GL': 'egl'},
