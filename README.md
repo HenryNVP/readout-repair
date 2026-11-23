@@ -28,56 +28,67 @@ Extracted from [edge-vla-hil](https://github.com/HenryNVP/edge-vla-hil/tree/poli
 ## Main results
 
 All numbers are closed-loop success (%) on held-out test seeds: 100 episodes per cell (50 for
-SmolVLA and ToolHang), with Wilson 95% intervals of at most ±10 points.
+SmolVLA and ToolHang), with Wilson 95% intervals of at most ±10 points. They match the paper draft
+as of 2026-11-22.
 
 **Lift is mostly head-limited; Square and ToolHang are not.** On Lift, 9 of the 11 perturbations
 that cause a failure are head-limited, across all three policies, with in-distribution success
-intact. On Square and ToolHang none of the 10 failures is: the retrain leaves ACT and Diffusion
-Policy at 0–2%, the control's level.
+at 98–100% after the retrain. On Square and ToolHang none of the 25 failures is: retrained, all
+three policies stay at 0–10%.
 
 Base → head retrained, one round of counterfactual labels (**bold** = head-limited, † = 300
-episodes, ° = not a failure):
+episodes, ° = not a failure, – = no failure on the dev seeds):
 
-| Perturbation (both cameras) | Lift ACT | Lift Diffusion | Lift SmolVLA | Square ACT | Square Diffusion | ToolHang ACT |
-|---|---|---|---|---|---|---|
-| turn 30° + wrist roll 90° | 4 → 63† | **91 → 100** | **64 → 88** | 0 → 0 | 1 → 2 | – |
-| red table, dim + roll | **49 → 78** | **66 → 98** | 90 → 100° | 2 → 0 | 0 → 1 | – |
-| upside down | **36 → 85** | **54 → 99** | 56 → 72 | 0 → 1 | 0 → 1 | 0 → 0 |
-| zoomed | **37 → 83** | – | – | 0 → 0 | – | – |
-| faint object | **82 → 100** | **62 → 94** | 90 → 98° | 2 → 1 | 0 → 0 | – |
-| *invisible object (control)* | 28 → 55† | 58 → 78 | 26 → 60 | 0 → 0 | 0 → 0 | 0 → 0 |
-| head-limited / failures | 4/5 | 4/4 | 1/2 | 0/5 | 0/4 | 0/1 |
+| Perturbation (both cameras) | Lift ACT | Lift DP | Lift SmolVLA | Square ACT | Square DP | Square SmolVLA | ToolHang ACT | ToolHang DP |
+|---|---|---|---|---|---|---|---|---|
+| turn 30° + wrist roll 90° | 4 → 63† | **91 → 100** | **64 → 88** | 0 → 0 | 1 → 2 | 0 → 0 | 0 → 0 | 0 → 0 |
+| red table, dim + roll | **49 → 78** | **66 → 98** | 90 → 100° | 2 → 0 | 0 → 1 | 2 → 2 | 0 → 0 | 0 → 0 |
+| upside down | **36 → 85** | **54 → 99** | 56 → 72 | 0 → 1 | 0 → 1 | 2 → 0 | 0 → 0 | 0 → 0 |
+| zoomed | **37 → 83** | – | – | 0 → 0 | 0 → 1 | 0 → 2 | 0 → 0 | 0 → 0 |
+| faint object | **82 → 100** | **62 → 94** | 90 → 98° | 2 → 1 | 0 → 0 | 2 → 10 | 2 → 8 | 0 → 0 |
+| *invisible object (control)* | 28 → 55† | 58 → 78 | 26 → 60 | 0 → 0 | 0 → 0 | 0 → 2 | 0 → 0 | 0 → 0 |
+| head-limited / failures | 4/5 | 4/4 | 1/2 | 0/5 | 0/5 | 0/5 | 0/5 | 0/5 |
 
-The two Lift exceptions (ACT under turn + roll, SmolVLA upside down) recover partly, but no further
-than the blind control.
+In distribution the base policies reach 100% on Lift; 84% (ACT), 95% (DP) and 26% (SmolVLA) on
+Square; 40% (ACT) and 72% (DP) on ToolHang. The two Lift exceptions (ACT under turn + roll,
+SmolVLA upside down) recover partly, but no further than the blind control.
 
-**Out-of-range object: the head alone recovers most of the gap.** With the Lift cube 5–7 cm beyond
-the demonstrated ±3 cm, its offset stays decodable at the head's input while the action barely
-follows it. Retraining ACT's 5,130-weight head on pseudo-labels, with no demonstrations, recovers
-most of what a full 52M-weight retrain on 400 shifted demos gets:
+**Out-of-range object: the head alone closes most of the gap.** With the Lift cube 5–7 cm beyond
+the demonstrated ±3 cm, its offset stays decodable at ACT's head input (gain 0.85 / 0.78) while
+the action barely follows it (0.28 / 0.09). Retraining the head on pseudo-labels, with no
+demonstrations, closes over half of the gap to a head retrained on expert labels:
 
-| ACT, Lift, cube out of range | x | y | in-dist. | weights changed |
-|---|---|---|---|---|
-| base | 55 | 47 | 100 | – |
-| full retrain, 400 shifted demos | 100 | 100 | 100 | 52M |
-| head retrain, DAgger expert labels | 99 | 91 | 100 | 5,130 |
-| head retrain, pseudo-labels, no demos | 85 | 72 | 99 | 5,130 |
-| head retrain, in-distribution labels (control) | 54 | 49 | 100 | 5,220 |
+| Lift, cube out of range (x / y / in-dist.) | ACT | SmolVLA | Diffusion Policy |
+|---|---|---|---|
+| base | 55 / 47 / 100 | 67 / 46 / 100 | 66 / 79 / 100 |
+| head retrain, DAgger expert labels (per axis) | 99 / 91 / 100 | 91 / 86 / 100 | 98 / 87 / 100 |
+| head retrain, pseudo-labels, no demos | 85 / 72 / 99 | 88 / 88 / 92 | 93 / 92 / 100 |
+| head retrain, in-distribution labels (control) | 54 / 49 / 100 | 67 / 50 / 100 | 64 / 74 / 100 |
+| weights changed | 5,130 | 23,072 | 11.6M |
 
-SmolVLA fails out of range the same way (67 / 46) and is fixed the same way (91 / 86, retraining
-23,072 weights).
+For ACT, a full 52M-weight retrain on 400 shifted demos (the expert) reaches 100 / 100.
 
-**Square needs depth.** For ACT on Square (turn + roll), four DAgger iterations on the same labels
-give: head only 0%, LoRA (rank 8, 457K weights) 25%, full fine-tuning 43%. The cost is forgetting:
-in-distribution success drops from 84% to 73%.
+**Square needs depth.** For ACT on Square (turn + roll), full fine-tuning reaches 0, 1, 18, 43 and
+40% over DAgger iterations 1–5. On the same four iterations of labels: head only 0%, LoRA (rank 8,
+457K weights) 25%, full fine-tuning 43%, while in-distribution success falls from 84% to 73% (48%
+after five). On ToolHang, two iterations of full fine-tuning give 0 of 30.
 
-**The probe is consistent with the regimes but does not decide them.** Decodability of the grasp
-point does not predict ACT's turn + roll exception, and Diffusion Policy loses it on Lift where the
-retrain still works. The retrain, not the probe, is the decisive measurement.
+**The regime follows the task, not the severity.** Weakened perturbations that make Square fail
+only partly are still not head-limited: object opacity 0.3 takes ACT from 36% to 51% and Diffusion
+Policy from 24% to 26%; a wrist roll alone takes Diffusion Policy from 28% to 41%.
 
-**The regime follows the task, not the severity.** Weakening the perturbations until Square fails
-only partly does not change it: from 24–36% base success the head retrain adds at most 15 points
-on Square, where Lift from the same 36% gains 49.
+**The probe is consistent with the regimes but does not decide them.** The grasp point is
+decodable in distribution on Lift and Square (R² 0.78–0.93), not on ToolHang (0.25). Diffusion
+Policy upside down on Lift is fixed at a probe R² of 0.20, while ACT under turn + roll (0.85) and
+the partial Square failures (0.18–0.49) are not.
+
+**What `pipeline/` covers.** It reproduces all of the above except the cells added to the paper
+after this repo was extracted, which ran from edge-vla-hil's `policy-interp` branch and are not
+yet in the pipeline:
+- the Square SmolVLA and ToolHang Diffusion Policy columns (both policies trained for them);
+- ToolHang ACT beyond upside down and the control, and Square Diffusion Policy zoomed;
+- the SmolVLA pseudo-label and control rows and the Diffusion Policy column of the position table;
+- the in-distribution probe R² and ACT's probe on the partial Square failures.
 
 ## Layout
 
