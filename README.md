@@ -82,13 +82,7 @@ decodable in distribution on Lift and Square (R² 0.78–0.93), not on ToolHang 
 Policy upside down on Lift is fixed at a probe R² of 0.20, while ACT under turn + roll (0.85) and
 the partial Square failures (0.18–0.49) are not.
 
-**What `pipeline/` covers.** It reproduces all of the above except the cells added to the paper
-after this repo was extracted, which ran from edge-vla-hil's `policy-interp` branch and are not
-yet in the pipeline:
-- the Square SmolVLA and ToolHang Diffusion Policy columns (both policies trained for them);
-- ToolHang ACT beyond upside down and the control, and Square Diffusion Policy zoomed;
-- the SmolVLA pseudo-label and control rows and the Diffusion Policy column of the position table;
-- the in-distribution probe R² and ACT's probe on the partial Square failures.
+`pipeline/` produces every number above (Reproduce, below).
 
 ## Layout
 
@@ -122,8 +116,9 @@ Generated figures go to `figures/` and results to `outputs/` (both local, not in
 | rollouts and labels | `collect.py` (any policy, task, perturbation; records what the policy saw and its labels) |
 | retraining | `repair_act.py` (head, LoRA, full), `repair_dp.py`, `repair_vla.py` |
 | probes | `probe_sites.py` (decodability and gain per ACT site, swap test), `probe_r2.py` (grasp-point R²) |
-| data | `to_lerobot.py`, `augment_lift.py` (shifted demo replays), `render_toolhang.py` (ToolHang images), `demos_npz.py`, `stamp_act_checkpoint.py` |
-| tables and figures | `tables.py` (Tables 1–3, Figure 3), `fig_shifts.py` (Figure 2) |
+| data | `to_lerobot.py`, `augment_lift.py` (shifted demo replays), `render_toolhang.py` (ToolHang images), `dp_abs_hdf5.py` (DP's ToolHang training set), `demos_npz.py`, `stamp_act_checkpoint.py` |
+| training | `train_dp.py` (Diffusion Policy on ToolHang with the authors' code; `dp_shim/`, config `pipeline/dp_toolhang_84.yaml`); ACT and SmolVLA train with `lerobot-train` |
+| tables and figures | `tables.py` (Tables 1–2, the severity and depth numbers, `fig_depth.pdf`), `fig_shifts.py` (Figure 2) |
 | environment | `setup_env.sh` (venv, pins, `pip install -e .`) |
 
 ## Setup
@@ -144,17 +139,19 @@ Outputs go to `outputs/interp/` (gitignored).
 
 ```bash
 bash pipeline/0_fetch.sh      # robomimic demos, the DP authors' checkpoints, pinned DP/robomimic sources (~12 GB, checksummed)
-bash pipeline/1_train.sh      # ACT on Lift (base + x/y coverage), Square, ToolHang; SmolVLA on Lift
-bash pipeline/2_position.sh   # Table 1, probe and swap numbers
-bash pipeline/3_perturb.sh    # Table 2, probe R²
-bash pipeline/4_severity.sh   # Table 3
-bash pipeline/5_depth.sh      # Figure 3 (LoRA / full fine-tuning, DAgger iterations, forgetting)
+bash pipeline/1_train.sh      # ACT on Lift (base + x/y coverage), Square, ToolHang; SmolVLA on Lift and Square; DP on ToolHang
+bash pipeline/2_position.sh   # Table 2 (object position), probe and swap numbers
+bash pipeline/3_perturb.sh    # Table 1 (visual perturbations), probe R²
+bash pipeline/4_severity.sh   # task or severity (Square, weaker perturbations)
+bash pipeline/5_depth.sh      # fine-tuning deeper on Square (LoRA / full, DAgger iterations, forgetting)
 bash pipeline/6_figures.sh    # Figure 2, and every table again
 ```
 
-Compute, roughly, on one 8 GB consumer GPU: training a day or two (SmolVLA wants a 16 GB card);
-stages 2–5 a few days in total, most of it Diffusion Policy and SmolVLA rollouts. Seeds are fixed (training scenes 1, 2, …; evaluation
-scenes 3, 4), so a rerun evaluates on the paper's scenes.
+Compute, roughly: the four ACTs train in about a GPU-day on one 8 GB consumer GPU; each SmolVLA
+(~10 h) and Diffusion Policy on ToolHang (~12 h) want a 16 GB card (the paper's ran on a rented
+one). Stages 2–5 take a few days in total, most of it Diffusion Policy
+and SmolVLA rollouts. Seeds are fixed (training scenes 1, 2, …; evaluation scenes 3, 4), so a rerun
+evaluates on the paper's scenes.
 
 How close a rerun gets:
 - **ACT rollouts, probes and head retrains are deterministic** in this venv (bit-identical run to

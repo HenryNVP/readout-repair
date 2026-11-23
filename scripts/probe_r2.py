@@ -8,6 +8,7 @@ is touched, is ridge-decoded from the head input, every --stride-th tick:
   joint     one readout fit on unperturbed + perturbed episodes (5-fold CV by episode), R² on the
             perturbed rows: is the information there for a single linear map? (the paper's number)
   transfer  readout fit on the unperturbed episodes only, applied to the perturbed ones
+The first line is the probe in distribution: fit and CV-scored on the unperturbed episodes alone.
 
     python scripts/probe_r2.py --base outputs/interp/nuis/cf1_none \
         --shift bothcam=outputs/interp/nuis/cf1_bothcam --absolute
@@ -17,7 +18,7 @@ from __future__ import annotations
 import argparse
 
 from readout_repair.data import episode_files
-from readout_repair.probes import grasp_rows, scores
+from readout_repair.probes import grasp_rows, indist_score, scores
 
 
 def main() -> None:
@@ -29,6 +30,8 @@ def main() -> None:
                    help="the grasp point's table position before it is touched, not relative to the gripper")
     args = p.parse_args()
     base = grasp_rows(episode_files(args.base), args.stride, args.absolute)
+    r, mm = indist_score(base)
+    print(f'in distribution (unperturbed only, CV by episode): R² {r:.2f} / {mm:.1f} mm, {len(base[0])} rows')
     print(f'{"shift":14s} {"joint R² / mm":>15s} {"transfer R² / mm":>17s} {"unshifted R² / mm":>18s}  rows')
     for item in args.shift:
         name, pattern = item.split('=', 1)

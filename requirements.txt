@@ -24,3 +24,6 @@ zarr<3
 psutil
 tensorboardX
 pytest
+# training Diffusion Policy on ToolHang only (scripts/train_dp.py: its dataset loader)
+threadpoolctl==3.8.0
+imagecodecs==2025.3.30

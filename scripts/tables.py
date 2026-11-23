@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""The paper's tables and depth figure, from the rollout dirs the pipeline/ stages write.
+"""The paper's tables and results paragraphs, from the rollout dirs the pipeline/ stages write.
 
-  --table position   Table 1: success per axis (cube ±5/±7 cm) and unshifted, per arm
-  --table perturb    Table 2: base -> head retrained per policy, task and perturbation, with
+  --table perturb    Table 1: base -> head retrained per policy, task and perturbation, with
                      Wilson 95% intervals and the decision rule's verdict; writes grid.json
-  --table severity   Table 3: Square under weaker perturbations, dev sweep and test cells
-  --table depth      Figure 3: figures/fig_depth.pdf
+  --table position   Table 2: success per axis (cube ±5/±7 cm) and unshifted, per arm
+  --table severity   "Task or severity": Square under weaker perturbations, dev sweep and test cells
+  --table depth      "Fine-tuning deeper on Square": the DAgger iterations and depths, and
+                     figures/fig_depth.pdf
 
     python scripts/tables.py --table all
 """
@@ -23,11 +24,12 @@ from readout_repair.stats import wilson
 O = 'outputs/interp/'
 N = O + 'nuis/'
 PANELS = (('ACT, Lift', N, ''), ('Diffusion Policy, Lift', N, 'dp_'), ('SmolVLA, Lift', N, 'vla_'),
-          ('ACT, Square', N, 'sq_'), ('Diffusion Policy, Square', N, 'dpsq_'), ('ACT, ToolHang', N, 'th_'))
+          ('ACT, Square', N, 'sq_'), ('Diffusion Policy, Square', N, 'dpsq_'), ('SmolVLA, Square', N, 'vlasq_'),
+          ('ACT, ToolHang', N, 'th_'), ('Diffusion Policy, ToolHang', N, 'dpth_'))
 # in-distribution base success, the failure rule's reference: <prefix>eval3_base_none, except ACT
-# Lift's, which is Table 1's unshifted base cell
+# Lift's, which is Table 2's unshifted base cell
 INDIST_DIRS = {'ACT, Lift': O + 'lift_act_base_s3_shift_0,0'}
-# Table 1 arms: (label, rollout name, axis or None for both); dirs are lift_<name>_s3_shift_<offset>
+# Table 2 arms: (label, rollout name, axis or None for both); dirs are lift_<name>_s3_shift_<offset>
 POSITION = (('ACT base', 'act_base', None),
             ('full retrain, 400 shifted demos', 'act_xaug', 'x'), ('', 'act_yaug', 'y'),
             ('head retrain, DAgger expert labels', 'act_edit_x_onpolicy_head_r2', 'x'),
@@ -35,9 +37,17 @@ POSITION = (('ACT base', 'act_base', None),
             ('head retrain, pseudo-labels, no demos', 'act_edit_slfull_b3', None),
             ('head retrain, in-distribution labels', 'act_edit_x_head_r10_b1_unsh', None),
             ('SmolVLA base', 'vla_base', None),
-            ('head retrain, DAgger expert labels', 'vla_rep_xpos', 'x'), ('', 'vla_rep_ypos', 'y'))
+            ('head retrain, DAgger expert labels', 'vla_rep_xpos', 'x'), ('', 'vla_rep_ypos', 'y'),
+            ('head retrain, pseudo-labels, no demos', 'vla_slfull', None),
+            ('head retrain, in-distribution labels', 'vla_posctl', None),
+            ('Diffusion Policy base', 'dp_base', None),
+            ('head retrain, DAgger expert labels', 'dp_posx_r2', 'x'), ('', 'dp_posy_r2', 'y'),
+            ('head retrain, pseudo-labels, no demos', 'dp_possl', None),
+            ('head retrain, in-distribution labels', 'dp_posctl', None))
+# unshifted cells not in a lift_<name>_s3_shift_0,0 dir (DP's base is Table 1's)
+POSITION_INDIST = {'dp_base': N + 'dp_eval3_base_none'}
 AXES = {'x': ('-0.07,0', '-0.05,0', '0.05,0', '0.07,0'), 'y': ('0,-0.07', '0,-0.05', '0,0.05', '0,0.07')}
-# Table 3: dev sweep tags (sqbase_ / dpsqbase_, seed 0) and the cells taken to test
+# Task or severity: dev sweep tags (sqbase_ / dpsqbase_, seed 0) and the cells taken to test
 SEVERITY = (('none', 'none'), ('faint', 'object opacity 0.1'), ('faint03', 'object opacity 0.3'),
             ('faint05', 'object opacity 0.5'), ('wroll90', 'wrist roll 90 only'),
             ('cam10w30', 'turn 10 + roll 30'), ('light05', 'light x0.5'))
@@ -94,17 +104,18 @@ def pooled(dirs) -> tuple | None:
 
 
 def position() -> None:
-    print(f'{"Table 1: object position, Lift (%)":44s} {"x":>4s} {"y":>4s} {"in-dist.":>8s}')
+    print(f'{"Table 2: object position, Lift (%)":44s} {"x":>4s} {"y":>4s} {"in-dist.":>8s}')
     for label, name, axis in POSITION:
         cell = {a: pooled([f'{O}lift_{name}_s3_shift_{s}' for s in AXES[a]]) for a in AXES}
         if axis:
             cell = {a: (v if a == axis else None) for a, v in cell.items()}
-        print(f'{label or "":44s} {pct(cell["x"])} {pct(cell["y"])} {pct(rate(f"{O}lift_{name}_s3_shift_0,0")):>8s}'
+        indist = rate(POSITION_INDIST.get(name, f'{O}lift_{name}_s3_shift_0,0'))
+        print(f'{label or "":44s} {pct(cell["x"])} {pct(cell["y"])} {pct(indist):>8s}'
               f'   ({name})')
 
 
 def severity() -> None:
-    print(f'{"Table 3: Square, weaker perturbations (%)":36s} {"ACT dev":>7s} {"test":>9s}  {"DP dev":>6s} {"test":>9s}')
+    print(f'{"Task or severity: Square, weaker perturbations (%)":36s} {"ACT dev":>7s} {"test":>9s}  {"DP dev":>6s} {"test":>9s}')
     for tag, label in SEVERITY:
         cells = []
         for dev, pre in (('sqbase_', 'sq_'), ('dpsqbase_', 'dpsq_')):
@@ -200,20 +211,39 @@ def fig_depth(out: str, root: str = N) -> None:
     print(f'[fig] {out}/fig_depth.pdf')
 
 
+def depth(root: str = N) -> None:
+    """The numbers of "Fine-tuning deeper on Square" (ACT, turn + roll) and ToolHang's two iterations."""
+    def row(label, sh, un):
+        print(f'{label:44s} {pct(rate(root + sh)):>9s} {pct(rate(root + un)):>8s}')
+    print(f'{"Fine-tuning deeper, ACT, Square, turn + roll (%)":44s} {"perturbed":>9s} {"in-dist.":>8s}')
+    row('base', 'sq_eval3_base_bothcam', 'sq_eval3_base_none')
+    for k in range(1, 6):
+        n = f'sq_depth_full{"" if k == 1 else f"_r{k}"}'
+        row(f'full fine-tuning, DAgger iteration {k}', n + '_eval3_bothcam', n + '_eval3_none')
+    for label, n in (('head only, iterations 1-4', 'sq_depth_head_r4'), ('LoRA rank 8, iterations 1-4', 'sq_depth_all8_r4'),
+                     ('full, iterations 1-4 + 100 demos replayed', 'sq_depth_full_r4mix')):
+        row(label, n + '_eval3_bothcam', n + '_eval3_none')
+    print(f'{"ToolHang ACT, upside down":44s}')
+    for k in (1, 2):
+        row(f'full fine-tuning, DAgger iteration {k}', f'th_depth_full_r{k}_eval3_bothflip', f'th_depth_full_r{k}_eval3_none')
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument('--table', default='all', choices=('all', 'position', 'perturb', 'severity', 'depth'))
     p.add_argument('--json', default=O + 'grid.json')
     p.add_argument('--figs', default='figures')
     args = p.parse_args()
-    if args.table in ('all', 'position'):
-        position()
     if args.table in ('all', 'perturb'):
         perturb(args.json)
+    if args.table in ('all', 'position'):
+        position()
     if args.table in ('all', 'severity'):
         severity()
-    if args.table in ('all', 'depth') and glob.glob(N + 'sq_depth_full_r4_eval3_bothcam/ep*.npz'):
-        fig_depth(args.figs)
+    if args.table in ('all', 'depth'):
+        depth()
+        if glob.glob(N + 'sq_depth_full_r4_eval3_bothcam/ep*.npz'):
+            fig_depth(args.figs)
 
 
 if __name__ == '__main__':

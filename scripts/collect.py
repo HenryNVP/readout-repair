@@ -18,7 +18,7 @@ import os
 import numpy as np
 
 from readout_repair import REPO, harness
-from readout_repair.labels import cf_label, encode, self_label
+from readout_repair.labels import align_to_dp, cf_label, encode, self_label
 from readout_repair.sim import TASKS, Recorder, make_env, observe, place, state
 
 
@@ -37,11 +37,11 @@ def main() -> None:
                    help='dx,dy: move (m) the object at reset, before the first frame '
                         '(use --shift=-0.02,0: a leading minus reads as an option)')
     p.add_argument('--teacher', default='',
-                   help="another ACT (the expert): save its chunk at every prediction as the label "
-                        '(ACT: with the head inputs; SmolVLA: with --save-images)')
+                   help="another ACT (the expert): save its chunk as the label (ACT: at every "
+                        'prediction, with the head inputs; DP / SmolVLA: every --label-every ticks)')
     p.add_argument('--selflabel', nargs='?', const='slope', default='', choices=('slope', 'full', 'cf'),
                    help='labels without demos or a teacher: cf = the policy on the --nuisance-free '
-                        "render (labels.cf_label); slope / full = ACT's out-of-range pseudo-label "
+                        "render (labels.cf_label); slope / full = the out-of-range pseudo-label "
                         '(labels.self_label; full = slopes rescaled to gain 1)')
     p.add_argument('--nuisance', default='', help='nuisance spec: appearance shift at every reset')
     p.add_argument('--label-weights', default='',
@@ -76,8 +76,11 @@ def main() -> None:
     nuis = Nuisance(args.nuisance) if args.nuisance else None
     labeller = (make_policy(args.backend, args.label_weights, denoise_steps=args.denoise_steps)
                 if args.label_weights else policy)
-    # SmolVLA with --teacher: an ACT expert labels the VLA's own states (same abs10 action space)
-    teacher_pol = make_policy('act', args.teacher) if args.teacher and args.backend == 'smolvla' else None
+    # SmolVLA / DP with --teacher: an ACT expert labels their own states (same abs10 action space;
+    # for DP the chunk is shifted onto its horizon, align_to_dp)
+    teacher_pol = (make_policy('act', args.teacher) if args.teacher and args.backend in ('smolvla', 'dp')
+                   else None)
+    sampled_labels = args.backend in ('dp', 'smolvla') and bool(args.selflabel or teacher_pol is not None)
 
     def fresh(o):
         """Reset observation with the nuisance applied (the model is rebuilt each reset)."""
@@ -104,20 +107,21 @@ def main() -> None:
                 t = len(states)                                       # this tick
                 if args.backend == 'dp':
                     feats.append(encode(policy, stacked))
-                if args.backend == 'smolvla' and (args.selflabel == 'cf' or teacher_pol is not None):
-                    if t % args.label_every == 0:                    # VLA labels are costly
+                if sampled_labels:                  # DP / SmolVLA: costly, every --label-every ticks
+                    if t % args.label_every == 0:
                         label_ticks.append(t)
                         see(stacked)
                         if args.selflabel == 'cf':
-                            labels.append(cf_label(env, labeller, nuis, 'smolvla'))
-                        else:
+                            labels.append(cf_label(env, labeller, nuis, args.backend))
+                        elif teacher_pol is not None:
                             with torch.no_grad():
                                 labels.append(teacher_pol._model.predict_action_chunk(
                                     teacher_pol._obs_to_batch(stacked))[0].cpu().numpy())
-                elif args.backend == 'dp' and args.selflabel == 'cf':   # its head input: feats
-                    if t % args.label_every == 0:                       # DP labels are costly
-                        label_ticks.append(t)
-                        labels.append(cf_label(env, labeller, nuis, 'dp'))
+                            if args.backend == 'dp':
+                                labels[-1] = align_to_dp(labels[-1], policy.n_obs_steps)
+                        else:
+                            labels.append(self_label(env, labeller, rec.obs, None, task,
+                                                     full=args.selflabel == 'full', backend=args.backend))
                 elif act_labels:
                     see(stacked)
                     b = policy._obs_to_batch(stacked)

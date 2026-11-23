@@ -70,3 +70,9 @@ def test_scores_separate_moved_from_lost_information():
     assert s_moved['transfer'] < 0 and s_lost['joint'] < 0.1 and s_lost['transfer'] < 0.1
     same = fake(10, rng, lambda y: y / 10)
     assert scores(base, same)['joint'] > 0.9 and scores(base, same)['transfer'] > 0.9
+
+
+def test_indist_score_is_high_for_a_linear_code():
+    from readout_repair.probes import indist_score
+    r, mm = indist_score(fake(10, np.random.default_rng(1), lambda y: y / 10))
+    assert r > 0.9 and mm < 15

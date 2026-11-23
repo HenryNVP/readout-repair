@@ -14,8 +14,10 @@ ACT_LIFT_Y=$O/aug/train/act_lift_aug_y/checkpoints/last/pretrained_model
 ACT_SQ=$O/square/train/act_square_abs6/checkpoints/last/pretrained_model
 ACT_TH=$O/toolhang/train/act_toolhang_abs6/checkpoints/last/pretrained_model
 VLA=$O/vla/smolvla_lift/checkpoints/last/pretrained_model
+VLA_SQ=$O/vla/smolvla_square/checkpoints/last/pretrained_model
 DP_LIFT=checkpoints/dp_lift_ph_image_cnn.ckpt
 DP_SQ=checkpoints/dp_square_ph_image_cnn.ckpt
+DP_TH=$O/toolhang/dp/run/checkpoints/latest.ckpt                               # trained in 1_train.sh
 
 # the paper's perturbations (scripts/fig_shifts.py), each applied to both cameras
 declare -A SPEC=(
@@ -59,23 +61,23 @@ act_protocol() {   # task weights prefix n_unperturbed n_label n_eval tag
   col $N/${X}eval3_rep_$tag $task act $E/${X}rep_$tag 3 $6 --nuisance "$S"
   col $N/${X}eval3_rep_${tag}_none $task act $E/${X}rep_$tag 3 $6
 }
-dp_protocol() {   # task ckpt prefix tag
-  local task=$1 P=$2 X=$3 tag=$4 S=${SPEC[$4]}
+dp_protocol() {   # task ckpt prefix tag [n_label n_eval]
+  local task=$1 P=$2 X=$3 tag=$4 S=${SPEC[$4]} nl=${5:-40} ne=${6:-100}
   col $N/${X}cf1_none $task dp $P 1 30 --selflabel cf --label-every 4
-  col $N/${X}cf1_$tag $task dp $P 1 40 --selflabel cf --label-every 4 --nuisance "$S"
+  col $N/${X}cf1_$tag $task dp $P 1 $nl --selflabel cf --label-every 4 --nuisance "$S"
   [ -f $E/${X}rep_$tag.ckpt ] || python scripts/repair_dp.py --parent $P --out $E/${X}rep_$tag.ckpt \
     --data "$N/${X}cf1_$tag,$N/${X}cf1_none" > $E/${X}rep_$tag.log 2>&1
-  col $N/${X}eval3_base_$tag $task dp $P 3 100 --nuisance "$S"
-  col $N/${X}eval3_rep_$tag $task dp $E/${X}rep_$tag.ckpt 3 100 --nuisance "$S"
-  col $N/${X}eval3_rep_${tag}_none $task dp $E/${X}rep_$tag.ckpt 3 100
+  col $N/${X}eval3_base_$tag $task dp $P 3 $ne --nuisance "$S"
+  col $N/${X}eval3_rep_$tag $task dp $E/${X}rep_$tag.ckpt 3 $ne --nuisance "$S"
+  col $N/${X}eval3_rep_${tag}_none $task dp $E/${X}rep_$tag.ckpt 3 $ne
 }
-vla_protocol() {   # tag
-  local tag=$1 S=${SPEC[$1]}
-  col $N/vla_cf1_none lift smolvla $VLA 1 20 --selflabel cf --label-every 4 --save-images
-  col $N/vla_cf1_$tag lift smolvla $VLA 1 30 --selflabel cf --label-every 4 --save-images --nuisance "$S"
-  [ -f $E/vla_rep_$tag/edit.json ] || python scripts/repair_vla.py --parent $VLA --out $E/vla_rep_$tag \
-    --data "$N/vla_cf1_$tag,$N/vla_cf1_none" > $E/vla_rep_$tag.log 2>&1
-  col $N/vla_eval3_base_$tag lift smolvla $VLA 3 50 --nuisance "$S"
-  col $N/vla_eval3_rep_$tag lift smolvla $E/vla_rep_$tag 3 50 --nuisance "$S"
-  col $N/vla_eval3_rep_${tag}_none lift smolvla $E/vla_rep_$tag 3 50
+vla_protocol() {   # task weights prefix tag
+  local task=$1 P=$2 X=$3 tag=$4 S=${SPEC[$4]}
+  col $N/${X}cf1_none $task smolvla $P 1 20 --selflabel cf --label-every 4 --save-images
+  col $N/${X}cf1_$tag $task smolvla $P 1 30 --selflabel cf --label-every 4 --save-images --nuisance "$S"
+  [ -f $E/${X}rep_$tag/edit.json ] || python scripts/repair_vla.py --parent $P --out $E/${X}rep_$tag \
+    --data "$N/${X}cf1_$tag,$N/${X}cf1_none" > $E/${X}rep_$tag.log 2>&1
+  col $N/${X}eval3_base_$tag $task smolvla $P 3 50 --nuisance "$S"
+  col $N/${X}eval3_rep_$tag $task smolvla $E/${X}rep_$tag 3 50 --nuisance "$S"
+  col $N/${X}eval3_rep_${tag}_none $task smolvla $E/${X}rep_$tag 3 50
 }

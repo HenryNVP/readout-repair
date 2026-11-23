@@ -150,6 +150,13 @@ def grasp_rows(files: list[str], stride: int, absolute: bool = False):
     return np.concatenate(X), np.concatenate(Y), np.concatenate(G)
 
 
+def indist_score(base) -> tuple[float, float]:
+    """R² and xy RMSE (mm) of the probe fit on unperturbed episodes only (5-fold CV by episode)."""
+    X, Y, G = base
+    pred = group_cv(X, Y, G)
+    return r2(pred, Y), rmse(pred, Y)
+
+
 def scores(base, shifted) -> dict:
     """R² and xy RMSE (mm) of the grasp-point probe. 'joint': one readout fit on unshifted +
     shifted rows (5-fold CV by episode), scored on the shifted rows; 'base': the same on the

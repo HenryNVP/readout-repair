@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Figure 3 (Square needs depth; ACT, turn + roll): DAgger iterations of full fine-tuning, then the
+# Fine-tuning deeper on Square (ACT, turn + roll; a paragraph in the paper, figures/fig_depth.pdf): DAgger iterations of full fine-tuning, then the
 # head, LoRA (rank 8, every linear layer) and full fine-tuning on the same four iterations of
 # labels; the forgetting check with 100 demonstrations replayed; ToolHang's two iterations.
 # Iteration k: the iteration-(k-1) policy drives, the unedited policy labels the shift-free render.
