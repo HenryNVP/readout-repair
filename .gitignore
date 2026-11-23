@@ -3,6 +3,8 @@ outputs
 checkpoints
 data
 external/
+paper/
+
 
 __pycache__/
 *.pyc
