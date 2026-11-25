@@ -13,6 +13,11 @@ done
 
 for t in faint03 faint05; do act_protocol square $ACT_SQ sq_ 30 40 100 $t; done
 for t in faint03 wroll90; do dp_protocol square $DP_SQ dpsq_ $t; done
+# The two near misses, extended to 300 episodes (tables.py pools eval3_ with eval4_)
+col $N/sq_eval4_base_faint03 square act $ACT_SQ 4 200 --nuisance "${SPEC[faint03]}"
+col $N/sq_eval4_rep_faint03 square act $E/sq_rep_faint03 4 200 --nuisance "${SPEC[faint03]}"
+col $N/dpsq_eval4_base_wroll90 square dp $DP_SQ 4 200 --nuisance "${SPEC[wroll90]}"
+col $N/dpsq_eval4_rep_wroll90 square dp $E/dpsq_rep_wroll90.ckpt 4 200 --nuisance "${SPEC[wroll90]}"
 [ -f $O/repairable_sq_mild_abs.txt ] || python scripts/probe_r2.py --base "$N/sq_cf1_none" \
   --shift "faint03=$N/sq_cf1_faint03" --shift "faint05=$N/sq_cf1_faint05" --absolute --stride 2 \
   > $O/repairable_sq_mild_abs.txt
