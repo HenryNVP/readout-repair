@@ -28,8 +28,8 @@ Extracted from [edge-vla-hil](https://github.com/HenryNVP/edge-vla-hil/tree/poli
 ## Main results
 
 All numbers are closed-loop success (%) on held-out test seeds: 100 episodes per cell (50 for
-SmolVLA and ToolHang), with Wilson 95% intervals of at most ±10 points. They match the paper draft
-as of 2026-11-22.
+SmolVLA and ToolHang), reported with Wilson 95% intervals (about ±10 points at 100 episodes and
+±13 at 50, near 50% success). They match the paper draft as of 2026-11-22.
 
 **Lift is mostly head-limited; Square and ToolHang are not.** On Lift, 9 of the 11 perturbations
 that cause a failure are head-limited, across all three policies, with in-distribution success
@@ -53,9 +53,9 @@ In distribution the base policies reach 100% on Lift; 84% (ACT), 95% (DP) and 26
 Square; 40% (ACT) and 72% (DP) on ToolHang. The two Lift exceptions (ACT under turn + roll,
 SmolVLA upside down) recover partly, but no further than the blind control.
 
-**Out-of-range object: the head alone closes most of the gap.** With the Lift cube 5–7 cm beyond
-the demonstrated ±3 cm, its offset stays decodable at ACT's head input (gain 0.85 / 0.78) while
-the action barely follows it (0.28 / 0.09). Retraining the head on pseudo-labels, with no
+**Out-of-range object: the head alone closes most of the gap.** With the Lift cube shifted ±5 or
+±7 cm on top of the demonstrations' ±3 cm random placement, its offset stays decodable at ACT's
+head input (gain 0.85 / 0.78) while the action barely follows it (0.28 / 0.09). Retraining the head on pseudo-labels, with no
 demonstrations, closes over half of the gap to a head retrained on expert labels:
 
 | Lift, cube out of range (x / y / in-dist.) | ACT | SmolVLA | Diffusion Policy |
